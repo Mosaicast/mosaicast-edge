@@ -1,0 +1,26 @@
+# Env / secrets: never commit .env, only .env.example
+.env
+*.local
+
+# Build output and local scratch
+/mosaicast-edge
+/edge
+/tmp/
+/dist/
+*.test
+*.out
+
+# Policy / site cache written at runtime (EDGE_CACHE_DIR in dev)
+/cache/
+
+# Node tooling for browser checks
+node_modules/
+.playwright-mcp/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Claude Code: shared settings are committed, personal ones are not
+.claude/settings.local.json
