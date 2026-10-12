@@ -1,0 +1,17 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+{{- template "top" .}}
+<section class="edge-card edge-login-page">
+  <h1 class="edge-title" data-edge-text="login.title">{{.T "login.title"}}</h1>
+  {{if .Login.Error}}<p class="edge-error" role="alert" data-edge-login-error="{{.Login.Error}}">{{.Login.ErrorText}}</p>{{end}}
+  {{if .Login.Providers}}
+  <p class="edge-lead" data-edge-text="login.lead">{{.T "login.lead"}}</p>
+  <ul class="edge-providers">
+    {{range .Login.Providers}}<li><a class="edge-button edge-button--accent" href="{{.Href}}" data-edge-provider="{{.ID}}">{{$.Tr "login.with" "provider" .Name}}</a></li>{{end}}
+  </ul>
+  {{else}}
+  <p class="edge-lead" data-edge-text="login.none">{{.T "login.none"}}</p>
+  {{end}}
+  <p class="edge-actions"><a href="/" data-edge-text="login.back">{{.T "login.back"}}</a></p>
+</section>
+{{template "bottom" .}}

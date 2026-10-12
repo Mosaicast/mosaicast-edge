@@ -1,0 +1,9 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+{{- template "top" .}}
+<section class="edge-card edge-closed">
+  <h1 class="edge-title" data-edge-text="closed.title">{{.T "closed.title"}}</h1>
+  <p class="edge-lead" data-edge-text="closed.lead">{{.T "closed.lead"}}</p>
+  {{if .Viewer}}<p class="edge-note" data-edge-text="closed.signedIn">{{.T "closed.signedIn"}}</p>{{end}}
+</section>
+{{template "bottom" .}}

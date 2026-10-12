@@ -1,0 +1,109 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */
+
+/* The edge's default pages. They look like the site because every colour comes from the site's own
+   tokens (--mc-*, copied from core). A restyling theme overrides the --edge-* variables or the edge-*
+   classes below; THEMING.md lists them. */
+
+:root {
+  --edge-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --edge-font-display: var(--edge-font);
+  --edge-radius: 14px;
+  --edge-max: 40rem;
+  --edge-bg: var(--mc-bg);
+  --edge-bg-image: none;
+  --edge-card: var(--mc-surface);
+  --edge-text: var(--mc-text);
+  --edge-muted: var(--mc-text-muted);
+  --edge-link: var(--mc-accent-text);
+  --edge-border: var(--mc-border);
+  --edge-button: var(--mc-accent);
+  --edge-button-text: var(--mc-accent-contrast);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; min-height: 100vh; min-height: 100dvh;
+  background: var(--edge-bg) var(--edge-bg-image) center / cover no-repeat fixed;
+  color: var(--edge-text); font: 17px/1.55 var(--edge-font);
+}
+a { color: var(--edge-link); }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--mc-accent-text); outline-offset: 3px; }
+
+.edge-shell { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; padding: 0 16px; }
+.edge-brand { padding: 2.5rem 0 1.5rem; text-align: center; }
+.edge-logo img { display: block; height: 56px; max-width: min(280px, 70vw); width: auto; object-fit: contain; }
+/* with a dark logo: core's mode policy on <html data-mode>, and the visitor's preference under "system" */
+.edge-logo-dark, [data-mode="dark"] .edge-logo--paired .edge-logo-light { display: none; }
+[data-mode="dark"] .edge-logo--paired .edge-logo-dark { display: block; }
+@media (prefers-color-scheme: dark) {
+  [data-mode="system"] .edge-logo--paired .edge-logo-light { display: none; }
+  [data-mode="system"] .edge-logo--paired .edge-logo-dark { display: block; }
+}
+.edge-sitename { font: 700 1.5rem/1.2 var(--edge-font-display); }
+.edge-main { flex: 1; width: 100%; max-width: var(--edge-max); display: flex; flex-direction: column; justify-content: center; }
+
+.edge-card {
+  background: var(--edge-card); border: 1px solid var(--edge-border); border-radius: var(--edge-radius);
+  padding: clamp(1.5rem, 5vw, 2.75rem); text-align: center;
+}
+.edge-title { margin: 0 0 .75rem; font: 700 clamp(1.6rem, 5vw, 2.3rem)/1.15 var(--edge-font-display); text-wrap: balance; }
+.edge-lead { margin: 0 0 1rem; color: var(--edge-muted); text-wrap: pretty; }
+.edge-note { margin: 1rem 0 0; color: var(--edge-muted); font-size: .92em; }
+.edge-when { display: block; color: var(--edge-text); font-weight: 600; text-wrap: balance; }
+.edge-error {
+  margin: 0 0 1.25rem; padding: .75rem 1rem; border-radius: 10px; text-align: left;
+  border: 1px solid var(--mc-accent-text); color: var(--edge-text); background: var(--edge-bg);
+}
+.edge-actions { margin: 1.5rem 0 0; }
+.edge-button {
+  display: inline-block; padding: .65rem 1.25rem; border-radius: 999px; border: 1px solid var(--edge-border);
+  color: var(--edge-text); text-decoration: none; font-weight: 600;
+}
+.edge-button--accent { background: var(--edge-button); color: var(--edge-button-text); border-color: transparent; }
+.edge-providers { list-style: none; margin: 1.25rem 0 0; padding: 0; display: grid; gap: .75rem; justify-items: center; }
+
+/* countdown */
+.edge-units { display: grid; grid-template-columns: repeat(4, 1fr); gap: clamp(.4rem, 2vw, 1rem); margin: 1.25rem 0 .5rem; }
+.edge-unit { display: flex; flex-direction: column; align-items: center; padding: .75rem .25rem; border-radius: 10px; background: var(--edge-bg); }
+.edge-unit-value { font: 700 clamp(1.9rem, 8vw, 3.2rem)/1 var(--edge-font-display); font-variant-numeric: tabular-nums; }
+.edge-unit-label { margin-top: .35rem; color: var(--edge-muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+.edge-final { margin: .5rem 0; font: 800 clamp(6rem, 30vw, 11rem)/1 var(--edge-font-display); font-variant-numeric: tabular-nums; color: var(--mc-accent-text); }
+.edge-party { margin: .5rem 0; font: 700 clamp(1.8rem, 7vw, 3rem)/1.15 var(--edge-font-display); color: var(--mc-accent-text); }
+
+/* which block shows in which phase; the runtime moves <html data-phase> forward */
+.edge-show-final, .edge-show-party, .edge-show-handoff { display: none; }
+[data-phase="final"] .edge-show-wait,
+[data-phase="party"] .edge-show-wait, [data-phase="handoff"] .edge-show-wait { display: none; }
+[data-phase="final"] .edge-show-final { display: block; }
+[data-phase="party"] .edge-show-party, [data-phase="handoff"] .edge-show-handoff { display: block; }
+[data-phase="final"] .edge-final.is-tick { animation: edge-tick .9s ease-out; }
+@keyframes edge-tick { from { transform: scale(1.18); opacity: .4; } to { transform: none; opacity: 1; } }
+[data-phase="handoff"] .edge-countdown { animation: edge-fade 1s ease-in forwards; }
+@keyframes edge-fade { to { opacity: .35; } }
+
+/* unavailable: "back in a moment" first, "taking longer" after a minute */
+[data-down="short"] .edge-show-down-long, [data-down="long"] .edge-show-down-short { display: none; }
+
+/* legal pages: core's rendered markdown */
+.edge-legal-page { text-align: left; }
+.edge-prose { overflow-wrap: anywhere; }
+.edge-prose h2, .edge-prose h3 { margin: 1.5em 0 .5em; line-height: 1.25; }
+.edge-prose table { border-collapse: collapse; } .edge-prose td, .edge-prose th { border: 1px solid var(--edge-border); padding: .3em .5em; }
+
+.edge-footer {
+  display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; justify-content: center; align-items: center;
+  padding: 2rem 0 1.5rem; color: var(--edge-muted); font-size: .9rem;
+}
+.edge-footer a { color: var(--edge-muted); }
+.edge-footer a:hover { color: var(--edge-link); }
+.edge-footer .edge-legal { gap: .5rem 1.25rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (max-width: 420px) {
+  .edge-unit { padding: .6rem .1rem; }
+  .edge-unit-label { font-size: .68rem; letter-spacing: .02em; }
+}

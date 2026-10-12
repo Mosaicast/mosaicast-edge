@@ -1,0 +1,10 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+{{- template "top" .}}
+<section class="edge-card edge-unavailable">
+  <h1 class="edge-title" data-edge-text="unavailable.title">{{.T "unavailable.title"}}</h1>
+  <p class="edge-lead edge-show-down-short" data-edge-text="unavailable.short">{{.T "unavailable.short"}}</p>
+  <p class="edge-lead edge-show-down-long" data-edge-text="unavailable.long">{{.T "unavailable.long"}}</p>
+  <noscript><p class="edge-note"><a href="">{{.T "unavailable.retry"}}</a></p></noscript>
+</section>
+{{template "bottom" .}}

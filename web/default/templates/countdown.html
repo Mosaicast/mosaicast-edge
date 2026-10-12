@@ -1,0 +1,29 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+{{- template "top" .}}
+<section class="edge-card edge-countdown">
+  <h1 class="edge-title" data-edge-text="countdown.title">{{.T "countdown.title"}}</h1>
+
+  <div class="edge-show-wait">
+    <p class="edge-lead"><span data-edge-text="countdown.opens">{{.T "countdown.opens"}}</span>
+      <time class="edge-when" data-edge-when="opensAt" datetime="{{.OpensAt.UTC.Format "2006-01-02T15:04:05Z"}}">{{.When}}</time></p>
+    <div class="edge-units">
+      {{range $u := .Units}}<div class="edge-unit">
+        <span class="edge-unit-value" data-edge-unit="{{$u.Key}}">{{$u.Value}}</span>
+        <span class="edge-unit-label" data-edge-unit-label="{{$u.Key}}">{{$u.Label}}</span>
+      </div>{{end}}
+    </div>
+    {{if .Viewer}}<p class="edge-note" data-edge-text="countdown.signedIn">{{.T "countdown.signedIn"}}</p>{{end}}
+    <p class="edge-actions"><a class="edge-button" href="{{.Calendar}}" data-edge-calendar data-edge-text="countdown.calendar">{{.T "countdown.calendar"}}</a></p>
+  </div>
+
+  <div class="edge-show-final">
+    <p class="edge-final" data-edge-final>{{.Countdown.Total}}</p>
+  </div>
+
+  <div class="edge-show-party edge-show-handoff">
+    <p class="edge-party" data-edge-text="countdown.party">{{.T "countdown.party"}}</p>
+    <p class="edge-actions"><a class="edge-button edge-button--accent" href="/" data-edge-handoff data-edge-text="countdown.enter">{{.T "countdown.enter"}}</a></p>
+  </div>
+</section>
+{{template "bottom" .}}

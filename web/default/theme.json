@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "name": "Mosaicast edge default",
+  "version": "1",
+  "locales": ["en", "de"],
+  "pages": {
+    "countdown":   { "mode": "full", "template": "countdown.html" },
+    "maintenance": { "mode": "full", "template": "maintenance.html" },
+    "closed":      { "mode": "full", "template": "closed.html" },
+    "unavailable": { "mode": "full", "template": "unavailable.html" },
+    "login":       { "mode": "full", "template": "login.html" },
+    "legal":       { "mode": "full", "template": "legal.html" }
+  }
+}

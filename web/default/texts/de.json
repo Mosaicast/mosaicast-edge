@@ -1,0 +1,65 @@
+{
+  "title": "{site}",
+  "description": "{site} öffnet bald.",
+  "site.fallbackName": "Diese Seite",
+
+  "countdown.title": "{site} öffnet bald",
+  "countdown.opens": "Eröffnung",
+  "countdown.signedIn": "Du bist angemeldet. Die Seite öffnet für alle im selben Moment.",
+  "countdown.calendar": "In den Kalender",
+  "countdown.party": "Wir sind da!",
+  "countdown.enter": "Jetzt hinein",
+
+  "unit.d.one": "Tag",
+  "unit.d.other": "Tage",
+  "unit.h.one": "Stunde",
+  "unit.h.other": "Stunden",
+  "unit.m.one": "Minute",
+  "unit.m.other": "Minuten",
+  "unit.s.one": "Sekunde",
+  "unit.s.other": "Sekunden",
+
+  "maintenance.title": "{site} wird gewartet",
+  "maintenance.lead": "Wir arbeiten an der Seite und sind wieder da, sobald wir fertig sind.",
+  "maintenance.until": "Geplant bis",
+
+  "closed.title": "{site} ist geschlossen",
+  "closed.lead": "Die Seite ist gerade nicht erreichbar.",
+  "closed.signedIn": "Du bist angemeldet, aber die Seite ist für dein Konto gerade nicht geöffnet.",
+
+  "unavailable.title": "{site} ist gleich wieder da",
+  "unavailable.short": "Die Seite startet neu. Diese Seite lädt sich von selbst neu.",
+  "unavailable.long": "Das dauert länger als üblich. Diese Seite versucht es weiter und lädt sich von selbst neu.",
+  "unavailable.retry": "Erneut versuchen",
+
+  "login.title": "Anmeldung für das Team",
+  "login.lead": "Melde dich an, um die Seite zu sehen, solange sie noch nicht für alle offen ist.",
+  "login.with": "Mit {provider} anmelden",
+  "login.none": "Auf dieser Seite ist keine Anmeldung eingerichtet.",
+  "login.back": "Zurück zur Seite",
+  "login.link": "Anmeldung für das Team",
+  "login.provider.discord": "Discord",
+
+  "loginError.generic": "Anmeldung fehlgeschlagen. Bitte erneut versuchen.",
+  "loginError.failed": "Anmeldung fehlgeschlagen. Bitte erneut versuchen.",
+  "loginError.account_conflict": "Dieses Konto ist bereits mit einem anderen Nutzer verknüpft. Melde dich mit deiner bestehenden Methode an und verknüpfe es dann im Konto.",
+  "loginError.link_required": "Ein Konto mit dieser E-Mail existiert. Melde dich mit deiner bestehenden Methode an und verknüpfe dieses dann im Konto.",
+  "loginError.signups_closed": "Neue Konten können noch nicht angelegt werden. Die Anmeldung öffnet mit der Seite.",
+  "loginError.access_denied": "Die Anmeldung wurde abgebrochen.",
+  "loginError.authorization_request_not_found": "Die Anmeldung hat zu lange gedauert oder wurde in einem anderen Fenster begonnen. Bitte erneut versuchen.",
+
+  "legal.title": "Rechtliches",
+  "legal.nav": "Rechtliche Hinweise",
+  "legal.notFound": "Diese Seite gibt es nicht.",
+  "legal.back": "Zurück zur Seite",
+
+  "lang.nav": "Sprache",
+
+  "ics.summary": "{site} öffnet",
+  "ics.description": "{site} öffnet ihre Tore.",
+
+  "a11y.opensIn": "Eröffnung in {time}.",
+  "a11y.and": "und",
+  "a11y.final": "Eröffnung in 10 Sekunden.",
+  "a11y.open": "{site} ist geöffnet."
+}
