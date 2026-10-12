@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 The Mosaicast Authors
+#
+# Checks that source files changed in this PR carry both SPDX lines at the top (changed files only,
+# so nothing elsewhere blocks an unrelated PR). Same convention as every Mosaicast repo.
+name: License Headers
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  spdx:
+    name: License Headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check SPDX headers in changed source files
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base".."$head" -- \
+            '*.go' '*.js' '*.mjs' '*.css' '*.html' '*.sh' '*.yml' '*.yaml' 'Dockerfile' 'dev/*' '.env.example' \
+            | grep -vE '(^|/)(node_modules|tmp)/' || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No source files changed. ✅"; exit 0
+          fi
+          missing=0
+          for f in "${files[@]}"; do
+            [ -z "$f" ] && continue
+            [ -f "$f" ] || continue
+            head_lines="$(head -n 15 "$f")"
+            if ! printf '%s' "$head_lines" | grep -q 'SPDX-License-Identifier:'; then
+              echo "::error file=$f::Missing SPDX-License-Identifier header"
+              missing=1
+            elif ! printf '%s' "$head_lines" | grep -q 'SPDX-FileCopyrightText:'; then
+              echo "::error file=$f::Missing SPDX-FileCopyrightText header"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "Every changed source file needs both SPDX lines at the top:"
+            echo "  // SPDX-License-Identifier: AGPL-3.0-or-later"
+            echo "  // SPDX-FileCopyrightText: 2026 The Mosaicast Authors"
+            echo "Use the comment syntax of the file type (#, /* */, {{/* */}} in templates)."
+            exit 1
+          fi
+          echo "All changed source files have both SPDX headers. ✅"

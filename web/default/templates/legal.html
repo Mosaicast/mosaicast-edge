@@ -1,0 +1,13 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+{{- template "top" .}}
+<article class="edge-card edge-legal-page">
+  {{if .LegalPage}}
+  <h1 class="edge-title">{{.LegalPage.Title}}</h1>
+  <div class="edge-prose">{{.LegalPage.HTML}}</div>
+  {{else}}
+  <h1 class="edge-title" data-edge-text="legal.notFound">{{.T "legal.notFound"}}</h1>
+  {{end}}
+  <p class="edge-actions"><a href="/" data-edge-text="legal.back">{{.T "legal.back"}}</a></p>
+</article>
+{{template "bottom" .}}

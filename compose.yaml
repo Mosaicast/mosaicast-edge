@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 The Mosaicast Authors
+#
+# mosaicast-edge in front of Mosaicast core.
+#
+#   TLS terminator (nginx/Plesk) ──> 127.0.0.1:${EDGE_PORT} edge ──> app:8080 (core, on core's compose network)
+#
+# Core publishes its port on loopback only, which a container cannot reach through the host gateway, so
+# the edge joins core's network and talks to the `app` service directly. Start core first.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+services:
+  edge:
+    build: .
+    # always build from this folder on `up`: never run a stale image at a launch
+    pull_policy: build
+    environment:
+      EDGE_UPSTREAM: ${EDGE_UPSTREAM:-http://app:8080}
+      EDGE_CORE_TOKEN: ${EDGE_CORE_TOKEN:-}
+      EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-}
+      EDGE_TIMEZONE: ${EDGE_TIMEZONE:-UTC}
+      EDGE_POLL_INTERVAL: ${EDGE_POLL_INTERVAL:-2s}
+      # set only when EDGE_THEME_PATH names a theme folder (or theme.tgz) on the host
+      EDGE_THEME_DIR: ${EDGE_THEME_PATH:+/theme}
+      # or a theme fetched at startup: https://…/theme.tgz#sha256:… or owner/repo@tag#sha256:… (set one of the two)
+      EDGE_THEME: ${EDGE_THEME:-}
+      EDGE_THEME_TOKEN: ${EDGE_THEME_TOKEN:-}
+      EDGE_THEME_ALLOW_UNVERIFIED: ${EDGE_THEME_ALLOW_UNVERIFIED:-false}
+    volumes:
+      - edge-cache:/cache
+      - ${EDGE_THEME_PATH:-./deploy/no-theme}:/theme:ro
+    ports:
+      - "${EDGE_BIND:-127.0.0.1}:${EDGE_PORT:-8082}:8080"
+    networks: [core]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits:
+          # ~8 MB idle plus ~21 KB per open connection: EDGE_MAX_CONNS (3500) fits with room for page renders
+          memory: 128m
+    restart: unless-stopped
+
+volumes:
+  edge-cache:
+
+networks:
+  core:
+    external: true
+    name: ${CORE_NETWORK:-mosaicast-core_default}

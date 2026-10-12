@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 The Mosaicast Authors
+#
+# Publish the edge's container image when a GitHub Release is published (NOT on PR merge), as core does.
+#
+# Flow: bump VERSION, give CHANGELOG.md a heading for it (`## [0.2.0] – 2026-11-02`), merge, then draft a
+# Release with the tag `v0.2.0` from main. This workflow verifies the tag against the version anchor and
+# the changelog, then builds + pushes the image:
+#   - ghcr.io/mosaicast/mosaicast-edge → GitHub Container Registry (tag + :latest)
+#
+# The version anchor (VERSION) is the source of truth; the tag must equal it. The binary embeds the same
+# file, so `mosaicast-edge version` and the startup log show it whether the image came from here or was
+# built from the released commit.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify tag == version anchor
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Assert tag matches VERSION, and the changelog has the release
+        id: check
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          tag_v="${TAG#v}"   # strip an optional leading 'v'
+          file_v="$(tr -d '[:space:]' < VERSION)"
+          echo "tag=$tag_v VERSION=$file_v"
+          if ! printf '%s' "$file_v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error file=VERSION::VERSION '$file_v' is not a version like 1.2.3 or 1.2.3-rc.1."
+            exit 1
+          fi
+          if [ "$file_v" != "$tag_v" ]; then
+            echo "::error file=VERSION::Release tag '$TAG' ($tag_v) does not match the version anchor '$file_v' in VERSION. Bump VERSION and re-tag."
+            exit 1
+          fi
+          # a release nobody can read about is a release nobody can roll back to on purpose
+          if ! grep -qE "^## \[?v?${file_v//./\\.}\]?([[:space:]]|$)" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md has no heading for $file_v (e.g. '## [$file_v] – $(date -u +%F)'). Turn 'Unreleased' into it and re-tag."
+            exit 1
+          fi
+          echo "version=$file_v" >> "$GITHUB_OUTPUT"
+          echo "Edge version aligned at $file_v ✅"
+
+  publish-image:
+    name: Build & push image to GHCR
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # required to push to the GitHub Container Registry
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # No QEMU: the Dockerfile's build stage runs on the runner's platform and cross-compiles, and the
+      # runtime stage only copies files, so both platforms build natively and quickly.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image name (lowercase)
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ needs.verify.outputs.version }}
+            ${{ steps.img.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.title=mosaicast-edge
+            org.opencontainers.image.version=${{ needs.verify.outputs.version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+
+      - name: Check the pushed image reports the release
+        env:
+          IMAGE: ${{ steps.img.outputs.name }}:${{ needs.verify.outputs.version }}
+          WANT: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          got="$(docker run --rm "$IMAGE" version)"
+          echo "$got"
+          case "$got" in "mosaicast-edge $WANT "*) ;; *) echo "::error::the image reports '$got', not $WANT"; exit 1 ;; esac

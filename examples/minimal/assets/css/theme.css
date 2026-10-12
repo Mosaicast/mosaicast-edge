@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */
+
+/* Restyled pages (maintenance, closed): override the edge's variables. */
+:root { --edge-radius: 0; --edge-font-display: Georgia, "Times New Roman", serif; }
+
+/* The full countdown page: built on the site's own tokens, so it follows light and dark. */
+.mx { margin: 0; min-height: 100dvh; display: grid; grid-template-rows: 1fr auto; background: var(--mc-bg); color: var(--mc-text);
+  font: 18px/1.5 Georgia, "Times New Roman", serif; }
+.mx-stage { display: grid; place-content: center; text-align: center; padding: 2rem 16px; }
+.mx-kicker { color: var(--mc-text-muted); letter-spacing: .2em; text-transform: uppercase; font-size: .8rem; }
+.mx h1 { font-size: clamp(1.8rem, 6vw, 3rem); margin: .2em 0; }
+.mx a { color: var(--mc-accent-text); }
+.mx-clock { font: 700 clamp(2.4rem, 11vw, 5rem)/1 ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.mx-clock b { color: var(--mc-text-muted); font-weight: 400; }
+.mx-big { font: 700 clamp(7rem, 35vw, 14rem)/1 Georgia, serif; margin: 0; color: var(--mc-accent-text); }
+.mx-footer { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; justify-content: center; color: var(--mc-text-muted); padding: 1rem 16px; }
+.mx-footer a { color: inherit; }
+
+/* phases come from the runtime on <html data-phase>; the theme only shows and hides */
+.mx-final, .mx-party, .mx-almost { display: none; }
+[data-phase="final"] .mx-wait, [data-phase="party"] .mx-wait, [data-phase="handoff"] .mx-wait,
+[data-phase="party"] .mx-final, [data-phase="handoff"] .mx-final { display: none; }
+[data-phase="final"] .mx-final { display: block; }
+[data-phase="party"] .mx-party, [data-phase="handoff"] .mx-party { display: block; }
+/* a cue declared in theme.json: the last three seconds */
+[data-cue-almost] .mx-almost { display: block; }
+[data-cue-almost] .mx-big { color: var(--mc-accent); }
+.mx-big.is-tick { animation: mx-pop .8s ease-out; }
+@keyframes mx-pop { from { transform: scale(1.25); opacity: .3; } }
+.is-party { animation: mx-glow 1.2s ease-in-out infinite alternate; }
+@keyframes mx-glow { to { text-shadow: 0 0 .6em var(--mc-accent); } }
+@media (prefers-reduced-motion: reduce) { .mx * { animation: none !important; } }

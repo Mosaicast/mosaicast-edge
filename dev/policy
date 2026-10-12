@@ -1,0 +1,40 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 The Mosaicast Authors
+#
+# Drive the site-access policy on the core dev instance named "edge" (core's dev/instance.sh), as admin.
+#   dev/policy show
+#   dev/policy scheduled <seconds-from-now> [passFloor]     e.g. dev/policy scheduled 70
+#   dev/policy open-now
+#   dev/policy maintenance [endsAt-seconds-from-now]
+#   dev/policy closed | open
+#   dev/policy session <admin|podcaster|fan>                prints a MOSAICAST_SESSION value
+# STAFF_LOGIN=false hides the staff sign-in link on the pages (default true).
+set -eu
+CORE=${CORE:-/home/ned/mosaicast/mosaicast-core}
+eval "$("$CORE/dev/instance.sh" --name edge env)"
+J=$(mktemp); trap 'rm -f "$J"' EXIT
+cp "$MC_RUN_DIR/cookies-admin.txt" "$J"
+curl -s -c "$J" -b "$J" "$MC_APP_URL/api/meta" >/dev/null
+X=$(awk '$6=="XSRF-TOKEN"{print $7}' "$J" | tail -1)
+iso() { date -u -d "+$1 seconds" +%Y-%m-%dT%H:%M:%SZ; }
+put() {
+  curl -s -f -b "$J" -c "$J" -H "X-XSRF-TOKEN: $X" -H 'Content-Type: application/json' -X PUT \
+    "$MC_APP_URL/api/admin/site/access" -d "$1" >/dev/null && echo "ok: $1"
+}
+body() { # state opensAt endsAt floor
+  printf '{"state":"%s","opensAt":%s,"endsAt":%s,"passFloor":"%s","staffLoginVisible":%s,"signupsWhileClosed":false}' "$1" "$2" "$3" "$4" "${STAFF_LOGIN:-true}"
+}
+case "${1:-show}" in
+  show) curl -s "$MC_APP_URL/api/site/access"; echo ;;
+  scheduled) put "$(body scheduled "\"$(iso "${2:-70}")\"" null "${3:-podcaster}")" ;;
+  open-now) curl -s -f -b "$J" -c "$J" -H "X-XSRF-TOKEN: $X" -X POST "$MC_APP_URL/api/admin/site/access/open-now" >/dev/null && echo ok ;;
+  maintenance) if [ -n "${2:-}" ]; then e="\"$(iso "$2")\""; else e=null; fi; put "$(body maintenance null "$e" podcaster)" ;;
+  closed|open) put "$(body "$1" null null podcaster)" ;;
+  session)
+    S=$(mktemp); curl -s -c "$S" -b "$S" "$MC_APP_URL/api/meta" >/dev/null
+    SX=$(awk '$6=="XSRF-TOKEN"{print $7}' "$S" | tail -1)
+    curl -s -c "$S" -b "$S" -H "X-XSRF-TOKEN: $SX" -X POST "$MC_APP_URL/api/auth/dev-login?role=${2:?role}" >/dev/null
+    awk '$6=="MOSAICAST_SESSION"{print $7}' "$S" | tail -1; rm -f "$S" ;;
+  *) echo "unknown: $1" >&2; exit 2 ;;
+esac

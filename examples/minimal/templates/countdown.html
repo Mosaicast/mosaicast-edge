@@ -1,0 +1,37 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+<!doctype html>
+<html {{.HTMLAttrs}}>
+<head>
+  {{.EdgeHead}}
+  <title>{{.T "countdown.title"}}</title>
+</head>
+<body class="mx">
+  <main class="mx-stage">
+    <p class="mx-kicker">{{.Site.Name}}</p>
+
+    <section class="mx-wait">
+      <h1 data-edge-text="countdown.title">{{.T "countdown.title"}}</h1>
+      <p class="mx-clock">
+        <span data-edge-unit="d">{{.Countdown.D}}</span><b>:</b><span data-edge-unit="h">{{.Countdown.H}}</span><b>:</b><span data-edge-unit="m">{{.Countdown.M}}</span><b>:</b><span data-edge-unit="s">{{.Countdown.S}}</span>
+      </p>
+      <p><time data-edge-when="opensAt">{{.When}}</time></p>
+      <p><a href="{{.Calendar}}" data-edge-calendar data-edge-text="countdown.calendar">{{.T "countdown.calendar"}}</a></p>
+    </section>
+
+    <section class="mx-final">
+      <p class="mx-big" data-edge-final>{{.Countdown.Total}}</p>
+      <p class="mx-almost" data-edge-text="mx.almost">{{.T "mx.almost"}}</p>
+    </section>
+
+    <section class="mx-party">
+      <h1 data-edge-text="mx.open">{{.T "mx.open"}}</h1>
+      <p><a href="/" data-edge-handoff data-edge-text="countdown.enter">{{.T "countdown.enter"}}</a></p>
+    </section>
+  </main>
+
+  <footer class="mx-footer">
+    {{.EdgeLegal}} {{.EdgeLogin}} {{.EdgeLangs}} {{.EdgeCredits}}
+  </footer>
+</body>
+</html>

@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 The Mosaicast Authors
+#
+# Workflow for a mosaicast-edge THEME repository. Copy it to .github/workflows/theme.yml in the theme's
+# repo (the theme folder is the repository root) and set EDGE_REF below.
+#
+# - every push and pull request: `check-theme`, the same validation the edge runs at startup
+# - a published GitHub Release: the tag must equal theme.json's "version" (v1.2.0 ↔ "1.2.0"); then
+#   `pack-theme` builds theme.tgz (the same folder always packs to the same bytes), the release gets it
+#   as an asset, and the release notes get the line for the edge's EDGE_THEME, pin included:
+#     EDGE_THEME=owner/repo@v1.2.0#sha256:<digest>
+#
+# Release flow: bump "version" in theme.json, merge, publish a Release with the tag v<version>.
+name: Theme
+
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  # The mosaicast-edge the theme is checked and packed with: a release tag (v0.1.0) or a commit.
+  EDGE_REF: v0.1.0
+
+jobs:
+  check:
+    name: check-theme
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          cache: false   # a theme has no go.sum to key a cache on
+      - name: Install mosaicast-edge ${{ env.EDGE_REF }}
+        env:
+          # Only while mosaicast-edge is a private repository: a fine-grained token that can read it
+          # (Contents: read-only), as the secret MOSAICAST_EDGE_READ_TOKEN. Not needed once it is public.
+          EDGE_SOURCE_TOKEN: ${{ secrets.MOSAICAST_EDGE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EDGE_SOURCE_TOKEN:-}" ]; then
+            git config --global url."https://x-access-token:${EDGE_SOURCE_TOKEN}@github.com/Mosaicast/mosaicast-edge".insteadOf "https://github.com/Mosaicast/mosaicast-edge"
+            export GOPRIVATE=github.com/Mosaicast/mosaicast-edge
+          fi
+          GOFLAGS=-trimpath go install "github.com/Mosaicast/mosaicast-edge@${EDGE_REF}"
+      - name: check-theme
+        run: mosaicast-edge check-theme .
+
+  release:
+    name: Pack and attach theme.tgz
+    if: github.event_name == 'release'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to attach the asset and edit the release notes
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          cache: false   # a theme has no go.sum to key a cache on
+      - name: Install mosaicast-edge ${{ env.EDGE_REF }}
+        env:
+          # Only while mosaicast-edge is a private repository: a fine-grained token that can read it
+          # (Contents: read-only), as the secret MOSAICAST_EDGE_READ_TOKEN. Not needed once it is public.
+          EDGE_SOURCE_TOKEN: ${{ secrets.MOSAICAST_EDGE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EDGE_SOURCE_TOKEN:-}" ]; then
+            git config --global url."https://x-access-token:${EDGE_SOURCE_TOKEN}@github.com/Mosaicast/mosaicast-edge".insteadOf "https://github.com/Mosaicast/mosaicast-edge"
+            export GOPRIVATE=github.com/Mosaicast/mosaicast-edge
+          fi
+          GOFLAGS=-trimpath go install "github.com/Mosaicast/mosaicast-edge@${EDGE_REF}"
+
+      - name: Assert tag matches theme.json's version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          tag_v="${TAG#v}"
+          theme_v="$(jq -r '.version // empty' theme.json)"
+          echo "tag=$tag_v theme.json=$theme_v"
+          if [ "$theme_v" != "$tag_v" ]; then
+            echo "::error file=theme.json::Release tag '$TAG' ($tag_v) does not match theme.json's version '$theme_v'. Bump theme.json and re-tag."
+            exit 1
+          fi
+
+      - name: Pack, attach, note the pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          out="$(mosaicast-edge pack-theme -o "$RUNNER_TEMP/theme.tgz" .)"
+          echo "$out"
+          sum="$(printf '%s\n' "$out" | grep -oE '^sha256:[0-9a-f]{64}$')"
+          gh release upload "$TAG" "$RUNNER_TEMP/theme.tgz" --clobber
+          line="EDGE_THEME=${GITHUB_REPOSITORY}@${TAG}#${sum}"
+          notes="$(gh release view "$TAG" --json body -q .body)"
+          printf '%s\n\n**For the edge:**\n\n```\n%s\n```\n' "$notes" "$line" > "$RUNNER_TEMP/notes.md"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          printf '### %s\n\n```\n%s\n```\n' "theme.tgz attached" "$line" >> "$GITHUB_STEP_SUMMARY"

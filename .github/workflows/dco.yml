@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 The Mosaicast Authors
+#
+# Checks on every PR that all commits carry a valid `Signed-off-by:` line (DCO), and that no agent
+# session link ended up in a commit or the PR description.
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check Signed-off-by on all PR commits
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          for c in $(git rev-list "$base".."$head"); do
+            # skip merge commits (more than one parent)
+            if [ "$(git rev-list --parents -n 1 "$c" | wc -w)" -gt 2 ]; then
+              continue
+            fi
+            if ! git show -s --format=%B "$c" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+              echo "::error::Commit $c has no valid Signed-off-by line (DCO)."
+              git show -s --format='  %h %s' "$c"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo ""
+            echo "DCO check failed."
+            echo "Sign a commit:       git commit -s"
+            echo "Fix the last one:    git commit --amend -s --no-edit && git push --force-with-lease"
+            echo "Fix several:         git rebase --signoff <base>  (e.g. origin/main)"
+            exit 1
+          fi
+          echo "All commits signed off. ✅"
+
+      # A `Claude-Session:` trailer or link only opens for its author, so in a public history it is
+      # noise on every agent-assisted PR. `.claude/settings.json` turns it off at the source for
+      # Claude Code >= 2.1.183; this catches older clients, other agents and hand-written trailers. The id is part of the
+      # pattern on purpose, so prose about the link (this file, a PR describing it) does not match.
+      - name: No agent session links in commits or the PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          pattern='claude\.ai/code/session_[A-Za-z0-9_-]{6,}'
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          found=0
+          for c in $(git rev-list "$base".."$head"); do
+            if git show -s --format=%B "$c" | grep -qiE "$pattern"; then
+              echo "::error::Commit $c carries an agent session link."
+              git show -s --format='  %h %s' "$c"
+              found=1
+            fi
+          done
+          if printf '%s' "$PR_BODY" | grep -qiE "$pattern"; then
+            echo "::error::The PR description carries an agent session link. Remove that line."
+            found=1
+          fi
+          if [ "$found" -ne 0 ]; then
+            echo ""
+            echo "Session-link check failed."
+            echo "Agent attribution is welcome — keep the trailer, drop the link."
+            echo "Fix the last commit: git commit --amend && git push --force-with-lease"
+            exit 1
+          fi
+          echo "No session links. ✅"

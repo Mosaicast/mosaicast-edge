@@ -1,0 +1,9 @@
+.git
+.github
+.env
+tmp
+cache
+node_modules
+docs
+dev
+deploy

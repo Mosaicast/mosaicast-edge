@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "Minimal example",
+  "version": "1.0.0",
+  "locales": ["en", "de"],
+  "styles": ["css/theme.css"],
+  "scripts": ["js/theme.js"],
+  "pages": {
+    "countdown":   { "mode": "full", "template": "countdown.html" },
+    "maintenance": { "mode": "restyle" },
+    "closed":      { "mode": "restyle" }
+  },
+  "countdown": { "partySeconds": 8, "cues": { "almost": 3 } },
+  "credits": [
+    { "work": "Minimal example theme", "author": "The Mosaicast Authors", "license": "AGPL-3.0-or-later", "url": "https://github.com/Mosaicast/mosaicast-edge" }
+  ]
+}

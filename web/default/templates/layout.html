@@ -1,0 +1,34 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-or-later */ -}}
+{{- /* SPDX-FileCopyrightText: 2026 The Mosaicast Authors */ -}}
+{{/* Shared frame of the default pages: the site's logo and name on top, the legal links, staff
+     sign-in, language switch and credits at the bottom. A restyling theme hooks into the edge-* classes. */}}
+{{define "top"}}<!doctype html>
+<html {{.HTMLAttrs}}>
+<head>
+{{.EdgeHead}}
+<title>{{.PageTitle}}</title>
+</head>
+<body class="edge-page edge-page--{{.Page}}">
+<div class="edge-shell">
+<header class="edge-brand">
+  {{if .Site.Logo}}<span class="edge-logo{{if .Site.DarkLogo}} edge-logo--paired{{end}}">
+    <img class="edge-logo-light" src="{{.Site.Logo}}" alt="{{.Site.Name}}">
+    {{if .Site.DarkLogo}}<img class="edge-logo-dark" src="{{.Site.DarkLogo}}" alt="{{.Site.Name}}">{{end}}
+  </span>
+  {{else}}<span class="edge-sitename">{{.Site.Name}}</span>{{end}}
+</header>
+<main class="edge-main">
+{{end}}
+
+{{define "bottom"}}
+</main>
+<footer class="edge-footer">
+  {{.EdgeLegal}}
+  {{.EdgeLogin}}
+  {{.EdgeLangs}}
+  {{.EdgeCredits}}
+</footer>
+</div>
+</body>
+</html>
+{{end}}
