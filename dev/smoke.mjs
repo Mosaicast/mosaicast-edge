@@ -383,7 +383,7 @@ if (plugins.length) {
       expect(sb.status === 200 && /javascript/.test(sb.headers['content-type']), `${p.id} bundle for staff: ${sb.status} ${sb.headers['content-type']}`);
     }
   });
-  await check('plugins once open: each plugin page renders through the edge in a browser, its element defined, no console error that core itself does not show', async () => {
+  await check('plugins once open: each plugin page and an episode page with their slots render through the edge in a browser, no console error that core itself does not show', async () => {
     policy('open'); await settle();
     const out = [];
     // the same page straight from core: what it logs there is the plugin's own, not the edge's
@@ -405,6 +405,22 @@ if (plugins.length) {
         expect(!added.length, `${p.id}, only through the edge: ${added.join('; ')}`);
         const known = [...own].filter((e) => !e.endsWith(' /api/me'));
         out.push(`${p.id}: <${el}>${known.length ? ` (core shows the same without the edge: ${known.join('; ')})` : ''}`);
+      } finally { await v.ctx.close(); }
+    }
+    // an episode page carries every plugin's episode slot (the bingo card, the stats panel)
+    const ep = (await (await fetch(coreURL.origin + '/api/episodes?size=1')).json()).items?.[0];
+    const els = plugins.flatMap((p) => (p.slots ?? []).filter((x) => x.scope === 'episode' && x.placement === 'main' && x.visibleTo === 'anonymous').map((x) => x.element));
+    if (ep && els.length) {
+      const path = '/episodes/' + ep.slug;
+      const v = await visit(null, { path });
+      try {
+        await v.page.waitForFunction((ns) => ns.every((n) => customElements.get(n) && document.querySelector(n)), els, { timeout: 20000 });
+        await sleep(4000);
+        const own = await direct(path);
+        const norm = (e) => { const [text, url] = e.split(' @ '); return `${text.replace(/\(.*?\)/, '')} ${new URL(url ?? '/', EDGE).pathname}`; };
+        const added = v.errors.filter((e) => !own.has(norm(e)));
+        expect(!added.length, `${path}, only through the edge: ${added.join('; ')}`);
+        out.push(`episode page: ${els.map((e) => `<${e}>`).join(' ')}`);
       } finally { await v.ctx.close(); }
     }
     return out.join(', ');
