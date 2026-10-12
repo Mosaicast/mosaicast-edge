@@ -423,6 +423,7 @@ if (plugins.length) {
         out.push(`episode page: ${els.map((e) => `<${e}>`).join(' ')}`);
       } finally { await v.ctx.close(); }
     }
+    policy('scheduled', '3600'); await settle(); // the rows after this one expect the countdown
     return out.join(', ');
   });
 }
