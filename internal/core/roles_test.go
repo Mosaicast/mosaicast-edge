@@ -35,7 +35,11 @@ func newMe(t *testing.T) *meServer {
 		if m.block != nil {
 			<-m.block
 		}
-		if r.Header.Get("Cookie") == "" || strings.Count(r.Header.Get("Cookie"), "=") != 1 {
+		if a := r.Header.Get("Authorization"); a != "" {
+			if r.Header.Get("Cookie") != "" || !LooksLikeToken(strings.TrimPrefix(a, "Bearer ")) {
+				t.Errorf("a token lookup sends the token alone, got Cookie %q, Authorization %d bytes", r.Header.Get("Cookie"), len(a))
+			}
+		} else if r.Header.Get("Cookie") == "" || strings.Count(r.Header.Get("Cookie"), "=") != 1 {
 			t.Errorf("only the session cookie may reach core, got %q", r.Header.Get("Cookie"))
 		}
 		if m.status != 200 {
@@ -70,6 +74,62 @@ func visitor(ip string) *http.Request {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = ip + ":1234"
 	return r
+}
+
+// token makes a value shaped like core's personal access tokens.
+func token(n int) string {
+	return "mcp_" + base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%032d", n)))
+}
+
+func TestLooksLikeToken(t *testing.T) {
+	for v, want := range map[string]bool{
+		token(1): true,
+		"mcp_" + strings.Repeat("-_aZ09", 7) + "x": true,
+		"":                                     false,
+		"mcp_":                                 false,
+		token(1) + "A":                         false, // too long
+		token(1)[:46]:                          false, // too short
+		"MCP_" + token(1)[4:]:                  false,
+		"mcp_" + strings.Repeat("A", 42) + "=": false, // padded, or standard base64
+		"mcp_" + strings.Repeat("A", 42) + "+": false,
+		sessionID(1):                           false,
+	} {
+		if LooksLikeToken(v) != want {
+			t.Errorf("LooksLikeToken(%q) = %v", v, !want)
+		}
+	}
+	r := httptest.NewRequest("GET", "/", nil)
+	for h, want := range map[string]string{"Bearer " + token(1): token(1), "bearer " + token(1): "", "Basic x": "", "Bearer ": ""} {
+		r.Header.Set("Authorization", h)
+		if got, _ := BearerToken(r); got != want {
+			t.Errorf("BearerToken(%q) = %q, want %q", h, got, want)
+		}
+	}
+}
+
+func TestTokenLookup(t *testing.T) {
+	m := newMe(t)
+	c := &tick{t: time.Unix(0, 0)}
+	r := roles(m, c)
+	if role, err := r.TokenRole(context.Background(), "mcp_short", visitor("192.0.2.1")); role != Anonymous || err != nil || m.calls.Load() != 0 {
+		t.Fatalf("a malformed token is never looked up: %q %v, %d calls", role, err, m.calls.Load())
+	}
+	for range 3 {
+		if role, err := r.TokenRole(context.Background(), token(1), visitor("192.0.2.1")); role != "podcaster" || err != nil {
+			t.Fatalf("token: %q %v", role, err)
+		}
+	}
+	if m.calls.Load() != 1 {
+		t.Errorf("a token's answer is cached: %d calls", m.calls.Load())
+	}
+	m.status = 401
+	if role, _ := r.TokenRole(context.Background(), token(2), visitor("192.0.2.1")); role != Anonymous {
+		t.Error("a revoked token is anonymous")
+	}
+	_, _ = r.TokenRole(context.Background(), token(2), visitor("192.0.2.1"))
+	if m.calls.Load() != 2 {
+		t.Errorf("a revoked token is remembered: %d calls", m.calls.Load())
+	}
 }
 
 func TestLooksLikeSession(t *testing.T) {

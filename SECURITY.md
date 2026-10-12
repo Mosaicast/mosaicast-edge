@@ -11,7 +11,8 @@ The edge sits in front of Mosaicast core on the public internet. Reports about t
 
 - **Nothing behind it is reachable before it should be.** While the site is not open, only `/_a/*` (the
   edge's own pages and assets), the OAuth sign-in paths, core's legal URLs (redirected to the edge's copy)
-  and signed-in staff whose role core confirms reach core. Everything else gets the edge's page.
+  and signed-in staff whose role core confirms reach core, along with their automation tokens (checked
+  the same way, never above podcaster). Everything else gets the edge's page.
 - **A wrong upstream or a broken answer never opens the site.** Only a 200 or 304 for the policy counts;
   anything else keeps the last good policy, and with none the page is "unavailable".
 - **Visitors cannot make the edge hammer core.** Role lookups need a cookie of the right shape, are rate

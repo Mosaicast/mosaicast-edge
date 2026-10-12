@@ -29,7 +29,8 @@ source <(../mosaicast-core/dev/instance.sh --name edge env)   # MC_APP_URL etc. 
 dev/policy scheduled 70 | open-now | maintenance [secs] | closed | open | show | session <role>
 PW=~/.npm/_npx/e41f203b7505f1fb/node_modules/playwright node dev/smoke.mjs --theme <theme-dir> --restart-core
                            # the rehearsal: real image, every check, pass/fail table (~12 min);
-                           # --core-ref <tag|sha> moves core first, --only <regex> runs a subset
+                           # --core-ref <tag|sha> moves core first, --image <ref> tests a published
+                           # image, --only <regex> runs a subset
 ./tmp/edge preview --theme <dir>   # http://127.0.0.1:8090/_preview ; dev/go mounts only this repo, so
                                    # for paths outside it build tmp/edge and run it directly
 ```
@@ -45,7 +46,7 @@ Never `pkill -f` the server (matches the tool's own shell); use `tmp/edge.pid`.
 - `internal/policy` — `Access` (parse/validate, `Effective` on the edge's clock, `Passes`), `Store`
   (last good policy, disk cache, core up/down + downSince, `Seq` + `Wait` for the long-poll, flip timer).
 - `internal/core` — HTTP client; `Poller` (2 s, ETag/304; core down only after 2 failed polls in a row; any other status, 404 included, keeps the last good policy: a 404 means a wrong upstream, never "open"); `Roles` (`/api/me`: cookie shape
-  check `LooksLikeSession`, per-IP token bucket, in-flight cap, 30 s / 10 s negative cache, fail closed),
+  check `LooksLikeSession`, PAT `TokenRole` (`LooksLikeToken`, `BearerToken`; gate caps admin → podcaster), per-IP token bucket, in-flight cap, 30 s / 10 s negative cache, fail closed),
   `ClientIP`.
 - `internal/sitecopy` — copy of `/api/site` tokens, branding images, legal pages per locale; disk cache.
 - `internal/gate` — root handler: `/_a/*`, OAuth pass-through, open → proxy, cookie → role check,

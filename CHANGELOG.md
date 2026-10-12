@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.1] – 2026-10-12
+
+- Staff automation passes before the opening: a request with a personal access token
+  (`Authorization: Bearer mcp_…`, §18 / core §8.5) and no session that signs it in is checked against
+  `/api/me` like a session cookie: shape check first, the same cache, per-client budget and in-flight cap,
+  only that header forwarded, never logged. A token counts as a podcaster at most, as in core, so a pass
+  floor of `admin` keeps every token out. Before, the edge answered such requests with a 503 until the
+  opening.
+- `dev/smoke.mjs`: `--image <ref>` rehearses a published image (a release) instead of building one;
+  `--plugin-dir <dir>` loads built plugins into core and adds their rows (gated while not open, rendered
+  through the edge once open, no console error core does not show itself); rows for tokens and for core's
+  rate limits counting per visitor behind the edge. Without `--plugin-dir`, core runs without plugins.
+
 ## [0.1.0] – 2026-10-12
 
 First version.
