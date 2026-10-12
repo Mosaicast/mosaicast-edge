@@ -19,6 +19,8 @@
 //   --skip-launch    skip the launch runs (open now, the opening at opensAt, the admin page; ~5 min)
 //   --skip-expiry    skip the ~100 s artwork-expiry run
 //   --only REGEX     run only the checks whose name matches (case-insensitive), e.g. --only 'admin page'
+//   --plugin-dir DIR a built plugin (its plugin.tgz unpacked) to load into core; repeatable. Adds the
+//                    plugin rows: gated while not open, rendered through the edge once open
 //
 // Between the edge and core sits a small counting proxy, so the run can tell how often the edge asked
 // core who someone is, and can make core unreachable for the edge (coreDown) without stopping it. Leaves the policy at "open" and removes its containers when done.
@@ -43,8 +45,11 @@ const TOKEN = process.env.EDGE_CORE_TOKEN ?? 'dev-edge-token';
 const PORT = Number(opt('--port') ?? 8290);
 const EDGE = `http://127.0.0.1:${PORT}`;
 const theme = opt('--theme') ? resolve(opt('--theme')) : '';
+const pluginDirs = args.flatMap((a, i) => (a === '--plugin-dir' ? [resolve(args[i + 1])] : []));
+const plugins = pluginDirs.map((d) => JSON.parse(readFileSync(join(d, 'plugin.json'), 'utf8')));
 const coreArgs = ['--app-arg', `--mosaicast.edge.token=${TOKEN}`,
-  ...(flag('--discord') ? ['--app-arg', '--DISCORD_CLIENT_ID=dummy', '--app-arg', '--DISCORD_CLIENT_SECRET=dummy'] : [])];
+  ...(flag('--discord') ? ['--app-arg', '--DISCORD_CLIENT_ID=dummy', '--app-arg', '--DISCORD_CLIENT_SECRET=dummy'] : []),
+  ...(pluginDirs.length ? pluginDirs.flatMap((d) => ['--plugin-dir', d]) : ['--no-plugins'])]; // never a previous run's plugins
 
 const sh = (cmd, a, o = {}) => execFileSync(cmd, a, { encoding: 'utf8', ...o }).trim();
 const policy = (...a) => sh(join(here, 'policy'), a);
@@ -83,6 +88,7 @@ const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
 // ---------- core, image, proxy, container ----------
 const coreRef = opt('--core-ref') ?? opt('--core');
 if (coreRef) { console.log(`core → ${coreRef} …`); instance('restart', '--core', coreRef, ...coreArgs); }
+else { console.log(pluginDirs.length ? 'core: loading the plugins …' : 'core: without plugins …'); instance('restart', ...coreArgs); }
 const env = Object.fromEntries(instance('env').split('\n').filter((l) => l.includes('=')).map((l) => {
   const [k, ...v] = l.replace(/^export /, '').split('='); return [k, v.join('=').replace(/^['"]|['"]$/g, '')];
 }));
@@ -158,7 +164,12 @@ async function visit(session, o = {}) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error' && !/status of (503|404)/.test(m.text())) errors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error' || /status of (503|404)/.test(m.text())) return;
+    const at = m.location()?.url ?? '';
+    if (/status of 401/.test(m.text()) && new URL(at, EDGE).pathname === '/api/me') return; // core's shell asking who an anonymous visitor is
+    errors.push(`${m.text()}${at ? ' @ ' + at : ''}`);
+  });
   const res = await page.goto(EDGE + (o.path ?? '/'));
   return { ctx, page, res, errors };
 }
@@ -305,6 +316,100 @@ await check('HTTP: non-HTML GET and POST get a plain 503 with Retry-After; HEAD 
   expect(b.status === 503 && b.headers['retry-after'], `POST: ${b.status}`);
   expect(h.status === 200 && h.body === '' && h.headers['cache-control'] === 'no-store', `HEAD: ${h.status}`);
 });
+
+// A personal access token, minted directly at core with the session's CSRF token (§8.5).
+async function mintToken(session) {
+  const jar = { MOSAICAST_SESSION: session };
+  const r0 = await fetch(coreURL.origin + '/api/meta', { headers: { Cookie: `MOSAICAST_SESSION=${session}` } });
+  for (const c of r0.headers.getSetCookie()) { const [kv] = c.split(';'); const [k, ...v] = kv.split('='); jar[k] = v.join('='); }
+  const headers = { Cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '), 'X-XSRF-TOKEN': jar['XSRF-TOKEN'], 'Content-Type': 'application/json' };
+  const r = await fetch(coreURL.origin + '/api/me/tokens', { method: 'POST', headers, body: JSON.stringify({ name: 'edge rehearsal' }) });
+  expect(r.ok, `minting a token: ${r.status}`);
+  const t = await r.json();
+  return { secret: t.secret, revoke: () => fetch(coreURL.origin + '/api/me/tokens/' + t.id, { method: 'DELETE', headers }) };
+}
+
+await check('automation token (Authorization: Bearer) while scheduled: a podcaster\'s passes, an admin\'s is a podcaster at most, a made-up one gets the plain 503 for one lookup', async () => {
+  policy('scheduled', '3600'); await settle();
+  // only podcasters and admins can mint one (a fan's token is the edge's unit test)
+  const pod = await mintToken(sessions.podcaster), adm = await mintToken(sessions.admin);
+  try {
+    const me = (t) => get('/api/me', { Accept: 'application/json', Authorization: 'Bearer ' + t, 'X-Forwarded-For': freshIP() });
+    const p = await me(pod.secret), a = await me(adm.secret);
+    expect(p.status === 200 && JSON.parse(p.body).role === 'podcaster', `podcaster token: ${p.status}`);
+    expect(a.status === 200, `admin token, floor podcaster: ${a.status}`);
+    const before = meCalls;
+    const made = 'mcp_' + Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+    const m1 = await me(made), m2 = await me(made), junk = await me('mcp_not-a-token');
+    expect([m1, m2, junk].every((r) => r.status === 503 && r.headers['retry-after']), `made-up: ${m1.status} ${m2.status} ${junk.status}`);
+    expect(meCalls - before === 1, `made-up token twice + a malformed one cost core ${meCalls - before} lookups, want 1`);
+    policy('scheduled', '3600', 'admin'); await settle(); // the cache holds the account's role; the cap applies per request
+    const a2 = await me(adm.secret);
+    expect(a2.status === 503, `admin token, floor admin: ${a2.status} (a token never counts as admin)`);
+    return 'podcaster 200, admin 200 → 503 at floor admin, made-up 503 (1 lookup)';
+  } finally {
+    policy('scheduled', '3600'); await settle();
+    await Promise.all([pod, adm].map((t) => t.revoke()));
+  }
+});
+
+await check('rate limits per visitor through the edge: one client hitting /oauth2/authorization/* until 429 leaves another client unlimited', async () => {
+  const A = freshIP(), B = freshIP();
+  let n = 0, last = 0;
+  while (n < 40 && last !== 429) { last = (await get('/oauth2/authorization/discord', { 'X-Forwarded-For': A })).status; n++; }
+  expect(last === 429, `client A never limited after ${n} requests (last ${last})`);
+  const b = await get('/oauth2/authorization/discord', { 'X-Forwarded-For': B });
+  expect(b.status !== 429, `client B limited too (${b.status}): every visitor shares one bucket behind the edge`);
+  return `A: 429 after ${n}; B: ${b.status}`;
+});
+
+if (plugins.length) {
+  await check(`plugins (${plugins.map((p) => `${p.id} ${p.version}`).join(', ')}) while scheduled: pages, bundles and APIs gated for visitors; staff reach them`, async () => {
+    policy('scheduled', '3600'); await settle();
+    const active = await (await fetch(coreURL.origin + '/api/plugins/manifest')).json();
+    for (const p of plugins) expect(active.some((a) => a.id === p.id && a.version === p.version), `core has not loaded ${p.id} ${p.version}: ${active.map((a) => a.id + ' ' + a.version).join(', ')}`);
+    for (const p of plugins) {
+      const ip = freshIP();
+      const page = await get('/p/' + p.id, { ...html, 'X-Forwarded-For': ip });
+      // a browser loads a module with Accept */*, which gets the page; a script loader gets the plain 503
+      const bundle = await get(`/plugins/${p.id}/assets/${p.frontend.entry}`, { Accept: '*/*', 'X-Forwarded-For': ip });
+      const bundleJS = await get(`/plugins/${p.id}/assets/${p.frontend.entry}`, { Accept: 'application/javascript', 'X-Forwarded-For': ip });
+      const api = await get(`/api/plugins/${p.id}/data/site/x`, { Accept: 'application/json', 'X-Forwarded-For': ip });
+      const manifest = await get('/api/plugins/manifest', { Accept: 'application/json', 'X-Forwarded-For': ip });
+      expect(page.status === 200 && page.body.includes('data-page="countdown"'), `${p.id} page: ${page.status}`);
+      expect(bundle.body.includes('data-page="countdown"') && !/javascript/.test(bundle.headers['content-type']), `${p.id} bundle (*/*): ${bundle.status} ${bundle.headers['content-type']}`);
+      expect(bundleJS.status === 503 && api.status === 503 && manifest.status === 503, `${p.id} bundle ${bundleJS.status}, data ${api.status}, manifest ${manifest.status}`);
+      const sb = await get(`/plugins/${p.id}/assets/${p.frontend.entry}`, { ...cookie(sessions.podcaster), 'X-Forwarded-For': ip });
+      expect(sb.status === 200 && /javascript/.test(sb.headers['content-type']), `${p.id} bundle for staff: ${sb.status} ${sb.headers['content-type']}`);
+    }
+  });
+  await check('plugins once open: each plugin page renders through the edge in a browser, its element defined, no console error that core itself does not show', async () => {
+    policy('open'); await settle();
+    const out = [];
+    // the same page straight from core: what it logs there is the plugin's own, not the edge's
+    const direct = async (path) => {
+      const ctx = await browser.newContext(); const page = await ctx.newPage(); const errs = new Set();
+      page.on('console', (m) => { if (m.type() === 'error') errs.add(`${m.text().replace(/\(.*?\)/, '')} ${new URL(m.location()?.url ?? '/', coreURL).pathname}`); });
+      await page.goto(coreURL.origin + path); await sleep(4000); await ctx.close();
+      return errs;
+    };
+    for (const p of plugins) {
+      const el = p.frontend.elements.find((e) => e.endsWith('-page')) ?? p.frontend.elements[0];
+      const v = await visit(null, { path: '/p/' + p.id });
+      try {
+        await v.page.waitForFunction((n) => customElements.get(n) && document.querySelector(n), el, { timeout: 20000 });
+        await sleep(4000); // let it fetch its data
+        const own = await direct('/p/' + p.id);
+        const norm = (e) => { const [text, url] = e.split(' @ '); return `${text.replace(/\(.*?\)/, '')} ${new URL(url ?? '/', EDGE).pathname}`; };
+        const added = v.errors.filter((e) => !own.has(norm(e)));
+        expect(!added.length, `${p.id}, only through the edge: ${added.join('; ')}`);
+        const known = [...own].filter((e) => !e.endsWith(' /api/me'));
+        out.push(`${p.id}: <${el}>${known.length ? ` (core shows the same without the edge: ${known.join('; ')})` : ''}`);
+      } finally { await v.ctx.close(); }
+    }
+    return out.join(', ');
+  });
+}
 
 await check('robots.txt: only the share image and favicon allowed under /_a/', async () => {
   const r = await get('/robots.txt');

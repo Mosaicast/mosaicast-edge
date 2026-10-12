@@ -68,6 +68,7 @@ type Renderer interface {
 // RoleChecker is core.Roles in production.
 type RoleChecker interface {
 	Role(ctx context.Context, session string, visitor *http.Request) (string, error)
+	TokenRole(ctx context.Context, token string, visitor *http.Request) (string, error)
 }
 
 // Gate is the edge's root handler.
@@ -184,13 +185,36 @@ func (g *Gate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var viewer *Viewer
-	if c, err := r.Cookie(core.SessionCookie); err == nil && core.LooksLikeSession(c.Value) && view.Access != nil {
+	session := ""
+	if c, err := r.Cookie(core.SessionCookie); err == nil && core.LooksLikeSession(c.Value) {
+		session = c.Value
+	}
+	token, _ := core.BearerToken(r)
+	if !core.LooksLikeToken(token) {
+		token = ""
+	}
+	if (session != "" || token != "") && view.Access != nil {
 		if g.store.IsCoreDown() {
 			// circuit breaker: core is known to be down, asking it who this is would only wait
 			g.serveUnavailable(w, r)
 			return
 		}
-		role, err := g.roles.Role(r.Context(), c.Value, r)
+		role, err := core.Anonymous, error(nil)
+		if session != "" {
+			role, err = g.roles.Role(r.Context(), session, r)
+		}
+		// A personal access token, for automation (§8.5). Core reads it only when the session does not
+		// sign the request in, and caps it at podcaster: /api/me names the account's role, so the cap is
+		// applied here, and a token never meets a floor of admin.
+		if token != "" && err == nil && role == core.Anonymous {
+			role, err = g.roles.TokenRole(r.Context(), token, r)
+			if role == policy.RoleAdmin {
+				role = policy.RolePodcaster
+			}
+			if err == nil && !view.Access.Passes(role) {
+				role = core.Anonymous // refused like anyone else; a token does not mark a page as signed in
+			}
+		}
 		switch {
 		case errors.Is(err, core.ErrRateLimited) || errors.Is(err, core.ErrBusy):
 			slog.Debug("role check refused; showing the page", "err", err) // fail closed, quietly: floods are expected

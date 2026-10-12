@@ -46,7 +46,7 @@ Never `pkill -f` the server (matches the tool's own shell); use `tmp/edge.pid`.
 - `internal/policy` — `Access` (parse/validate, `Effective` on the edge's clock, `Passes`), `Store`
   (last good policy, disk cache, core up/down + downSince, `Seq` + `Wait` for the long-poll, flip timer).
 - `internal/core` — HTTP client; `Poller` (2 s, ETag/304; core down only after 2 failed polls in a row; any other status, 404 included, keeps the last good policy: a 404 means a wrong upstream, never "open"); `Roles` (`/api/me`: cookie shape
-  check `LooksLikeSession`, per-IP token bucket, in-flight cap, 30 s / 10 s negative cache, fail closed),
+  check `LooksLikeSession`, PAT `TokenRole` (`LooksLikeToken`, `BearerToken`; gate caps admin → podcaster), per-IP token bucket, in-flight cap, 30 s / 10 s negative cache, fail closed),
   `ClientIP`.
 - `internal/sitecopy` — copy of `/api/site` tokens, branding images, legal pages per locale; disk cache.
 - `internal/gate` — root handler: `/_a/*`, OAuth pass-through, open → proxy, cookie → role check,

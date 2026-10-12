@@ -18,8 +18,10 @@ Paths under `/_a/` belong to the edge in every state: its assets, `/_a/login`, `
 `/_a/calendar.ics` (a calendar entry for a scheduled opening, 404 otherwise), `/_a/healthz`, and
 `/_a/state`, which the pages use to follow the policy live.
 
-Staff whose role meets the policy's pass floor go through to the real site. Anonymous visitors cost core
-nothing: no session cookie, no question to core. The edge keeps its last good policy and a copy of the
+Staff whose role meets the policy's pass floor go through to the real site, and so does their
+automation: a personal access token (`Authorization: Bearer mcp_…`) is checked like a session, as a
+podcaster at most, so a floor of admin keeps every token out. Anonymous visitors cost core nothing: no
+session cookie, no question to core. The edge keeps its last good policy and a copy of the
 site's look and legal pages on disk, so its pages render while core is down, and it opens a scheduled
 site on its own clock, on the second.
 
@@ -101,6 +103,9 @@ deployed, untouched, until after the launch: it is the rollback.
 1. **Core** runs a release with site access (ARCHITECTURE §18) and `MOSAICAST_EDGE_TOKEN` set, e.g.
    `openssl rand -hex 24`. Admin → Site access: set the policy (`scheduled`, the opening time, pass floor,
    whether the staff sign-in link shows). Core refuses new sign-ups from now on until the site opens.
+   With plugins installed by `MOSAICAST_PLUGINS`, the host's `./plugins` directory must be writable by
+   the core image's user (uid 10001), or core refuses to start: `sudo chown -R 10001 plugins` and check
+   with `docker compose logs app | grep -i plugin` that every plugin is loaded, none rejected.
 2. **Edge** next to it, not yet public:
    ```sh
    git clone … mosaicast-edge && cd mosaicast-edge
@@ -159,6 +164,13 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $D/oauth2/authorization
 
 Then in a browser: the countdown on a phone and a desktop; staff sign-in through `$D/_a/login` lands on
 the real site; a fan account sees the countdown ("signed in").
+
+Staff automation keeps working before the opening: a podcaster's personal access token (created in core) passes
+the edge with the default pass floor (`podcaster`), never with `admin`:
+
+```sh
+curl -s -H "Authorization: Bearer $MOSAICAST_TOKEN" $D/api/me     # 200 and the account; 503 = refused
+```
 
 ### Rollback
 

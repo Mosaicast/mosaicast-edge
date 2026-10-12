@@ -90,6 +90,22 @@ func LooksLikeSession(v string) bool {
 	return err == nil && uuidRe.Match(raw)
 }
 
+var tokenRe = regexp.MustCompile(`^mcp_[A-Za-z0-9_-]{43}$`)
+
+// LooksLikeToken reports whether v has the shape of a personal access token as core issues it (§8.5):
+// "mcp_" and the unpadded base64url of 32 random bytes. Anything else was not issued by core.
+func LooksLikeToken(v string) bool { return tokenRe.MatchString(v) }
+
+// BearerToken is the token of an "Authorization: Bearer …" header, read the way core's
+// PatAuthenticationFilter reads it.
+func BearerToken(r *http.Request) (string, bool) {
+	v, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
 func (r *Roles) init() {
 	r.once.Do(func() {
 		r.items = map[[32]byte]*list.Element{}
@@ -102,11 +118,29 @@ func (r *Roles) init() {
 // Role returns the session's role, or Anonymous. Any error must be treated as "not passed" by the
 // caller (fail closed). Errors other than a 401 are not cached, so recovery is immediate.
 func (r *Roles) Role(ctx context.Context, session string, visitor *http.Request) (string, error) {
-	r.init()
 	if !LooksLikeSession(session) {
 		return Anonymous, nil // core never issued this; asking would only cost core
 	}
-	key := sha256.Sum256([]byte(session))
+	// built by hand, never copied from the visitor: only the session cookie leaves the edge
+	cred := (&http.Cookie{Name: SessionCookie, Value: session}).String()
+	return r.lookup(ctx, "cookie", "Cookie", cred, session, visitor)
+}
+
+// TokenRole is Role for a personal access token (Authorization: Bearer). It returns the role of the
+// token's account as /api/me reports it; core caps a token at podcaster, and so must the caller.
+// Same budget, cap and cache as a cookie; the token is never logged.
+func (r *Roles) TokenRole(ctx context.Context, token string, visitor *http.Request) (string, error) {
+	if !LooksLikeToken(token) {
+		return Anonymous, nil
+	}
+	return r.lookup(ctx, "token", "Authorization", "Bearer "+token, token, visitor)
+}
+
+// lookup asks /api/me with one credential header (name: value) and nothing else of the visitor's
+// but the forwarded headers. secret keys the cache, by its hash, in the kind's own namespace.
+func (r *Roles) lookup(ctx context.Context, kind, name, value, secret string, visitor *http.Request) (string, error) {
+	r.init()
+	key := sha256.Sum256([]byte(kind + "\x00" + secret))
 	if role, ok := r.cached(key); ok {
 		return role, nil
 	}
@@ -124,8 +158,7 @@ func (r *Roles) Role(ctx context.Context, session string, visitor *http.Request)
 	defer cancel()
 	h := http.Header{}
 	h.Set("Accept", "application/json")
-	// built by hand, never copied from the visitor: only the session cookie leaves the edge
-	h.Set("Cookie", (&http.Cookie{Name: SessionCookie, Value: session}).String())
+	h.Set(name, value)
 	for _, k := range forwarded {
 		if v := visitor.Header.Values(k); len(v) > 0 {
 			h[k] = v

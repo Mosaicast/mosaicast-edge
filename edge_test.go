@@ -97,8 +97,12 @@ func (fc *fakeCore) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(fc.meStatus)
 			return
 		}
+		// core: a signed-in session wins, the bearer token is read only when the session is not (§8.5)
 		c, err := r.Cookie(core.SessionCookie)
 		role, ok := fc.roles[cookieValue(c, err)]
+		if bearer, isBearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); !ok && isBearer {
+			role, ok = fc.roles[bearer]
+		}
 		if !ok {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -351,6 +355,74 @@ func TestRoleCheck(t *testing.T) {
 	}
 	if w := e.do("GET", "/", map[string]string{"Accept": html, "Cookie": core.SessionCookie + "=" + session(1)}); w.Header().Get("X-Upstream") != "core" {
 		t.Error("admin always passes")
+	}
+}
+
+// pat makes a value shaped like core's personal access tokens.
+func pat(n int) string {
+	return "mcp_" + base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%032d", n)))
+}
+
+func TestTokenCheck(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	fc.roles[pat(1)] = "admin"
+	fc.roles[pat(2)] = "podcaster"
+	fc.roles[pat(3)] = "fan"
+	fc.roles[session(3)] = "fan"
+	e := newEdge(t, fc, &clock{t: t0}, "")
+	upload := func(hdr map[string]string) *httptest.ResponseRecorder {
+		return e.do("POST", "/api/plugins/stats/blob", hdr)
+	}
+	bearer := func(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
+
+	for n, want := range map[int]bool{1: true, 2: true, 3: false, 4: false} {
+		w := upload(bearer(pat(n)))
+		if passed := w.Header().Get("X-Upstream") == "core"; passed != want {
+			t.Errorf("token %d: passed=%v, want %v", n, passed, want)
+		}
+		if !want && (w.Code != 503 || w.Header().Get("Retry-After") == "") {
+			t.Errorf("token %d refused: plain 503 with Retry-After, got %d", n, w.Code)
+		}
+	}
+	if got := fc.lastReq.Header.Get("Authorization"); got != "Bearer "+pat(2) {
+		t.Error("a passed request reaches core with its token")
+	}
+
+	// a revoked token is remembered: sent again, it costs core nothing
+	calls := fc.meCalls.Load()
+	upload(bearer(pat(4)))
+	if fc.meCalls.Load() != calls {
+		t.Error("a revoked token is negative-cached")
+	}
+	// a token that core never issued is not looked up
+	for _, h := range []string{"Bearer mcp_short", "Bearer " + pat(2) + "x", "Basic " + pat(2), "bearer " + pat(2)} {
+		if w := upload(map[string]string{"Authorization": h}); w.Code != 503 || fc.meCalls.Load() != calls {
+			t.Errorf("%.12s…: %d, %d lookups", h, w.Code, fc.meCalls.Load()-calls)
+		}
+	}
+	// core reads the token only when the session does not sign the request in: a fan's session with a
+	// podcaster's token is the fan; a dead session with it is the token
+	both := bearer(pat(2))
+	both["Cookie"] = core.SessionCookie + "=" + session(3)
+	if w := upload(both); w.Header().Get("X-Upstream") != "" {
+		t.Error("a fan's session with a podcaster's token must not pass: core would serve the fan")
+	}
+	both["Cookie"] = core.SessionCookie + "=" + session(9)
+	if w := upload(both); w.Header().Get("X-Upstream") != "core" {
+		t.Error("an unknown session with a podcaster's token passes, as in core")
+	}
+
+	// a token is a podcaster at most, whatever the account: a floor of admin keeps every token out
+	fc.setAccess(strings.Replace(scheduled(t0.Add(time.Hour)), `"passFloor":"podcaster"`, `"passFloor":"admin"`, 1))
+	e.poll()
+	if w := upload(bearer(pat(1))); w.Header().Get("X-Upstream") != "" || w.Code != 503 {
+		t.Errorf("an admin's token must not pass a floor of admin, got %d", w.Code)
+	}
+	// and an HTML request with a token gets the page, not marked as signed in
+	w := e.do("GET", "/", map[string]string{"Accept": html, "Authorization": "Bearer " + pat(3)})
+	if !strings.Contains(w.Body.String(), `data-page="countdown"`) || strings.Contains(w.Body.String(), `data-viewer="signed-in"`) {
+		t.Error("a fan's token: the countdown, anonymous")
 	}
 }
 
