@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `dev/smoke.mjs --image <ref>` rehearses a published image (a release) instead of building one.
+
 ## [0.1.0] – 2026-10-12
 
 First version.

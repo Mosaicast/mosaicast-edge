@@ -8,6 +8,8 @@
 //   PW=<path to playwright> node dev/smoke.mjs [--theme DIR] [--core-ref REF] [--restart-core] [--skip-launch] [--skip-expiry]
 //
 //   --theme DIR      theme to mount (default: none, the edge's own look)
+//   --image REF      test that published image (e.g. ghcr.io/mosaicast/mosaicast-edge:0.1.0) instead of
+//                    building one from this checkout
 //   --core-ref REF   move core's "edge" instance to REF first (a commit or a release tag such as v0.8.4;
 //                    the same source the release image is built from); --core is the old name
 //   --discord        start core with dummy Discord credentials, so the provider list and the OAuth
@@ -87,7 +89,15 @@ const env = Object.fromEntries(instance('env').split('\n').filter((l) => l.inclu
 const coreURL = new URL(env.MC_APP_URL);
 const coreSHA = env.MC_CORE_SHA ?? '?';
 console.log(`core ${coreURL.origin} @ ${coreSHA}; building the image …`);
-sh('docker', ['build', '-q', '-t', 'mosaicast-edge:rehearsal', repo], { stdio: ['ignore', 'pipe', 'inherit'] });
+// --image REF tests a published image (the release) instead of one built from this checkout
+const IMAGE = opt('--image') ?? 'mosaicast-edge:rehearsal';
+if (opt('--image')) {
+  console.log(`pulling ${IMAGE} …`);
+  sh('docker', ['pull', '-q', IMAGE], { stdio: ['ignore', 'pipe', 'inherit'] });
+} else {
+  sh('docker', ['build', '-q', '-t', IMAGE, repo], { stdio: ['ignore', 'pipe', 'inherit'] });
+}
+const imageVersion = sh('docker', ['run', '--rm', IMAGE, 'version']);
 
 let meCalls = 0;
 let coreDown = false; // true: the edge's connections to core are cut, as when core is gone
@@ -112,7 +122,7 @@ function startEdge(name, port, themeDir, extraEnv = {}) {
   sh('docker', ['run', '-d', '--name', name, '--network', 'host', '--read-only', '--memory', '128m', '--memory-swap', '128m',
     '--security-opt', 'no-new-privileges:true', '--cap-drop', 'ALL', '-v', `${name}-cache:/cache`,
     ...(themeDir ? ['-v', `${themeDir}:/theme:ro`] : []),
-    ...Object.entries(e).flatMap(([k, v]) => ['-e', `${k}=${v}`]), 'mosaicast-edge:rehearsal']);
+    ...Object.entries(e).flatMap(([k, v]) => ['-e', `${k}=${v}`]), IMAGE]);
   containers.push(name);
 }
 async function healthy(url) {
@@ -549,7 +559,7 @@ await check('theme by download (EDGE_THEME, pinned): served; restart with the se
   let up = true; let hits = 0; let srv;
   try {
     const packed = sh('docker', ['run', '--rm', '-v', `${theme}:/theme:ro`, '-v', `${out}:/out`, '--entrypoint', '/mosaicast-edge',
-      'mosaicast-edge:rehearsal', 'pack-theme', '-o', '/out/theme.tgz', '/theme']);
+      IMAGE, 'pack-theme', '-o', '/out/theme.tgz', '/theme']);
     const sum = packed.match(/sha256:([0-9a-f]{64})/)?.[1];
     expect(sum, `pack-theme printed no digest: ${packed}`);
     const body = readFileSync(join(out, 'theme.tgz'));
@@ -824,7 +834,6 @@ policy('open');
 await browser.close();
 proxy.close();
 const logs = spawnSync('docker', ['logs', 'edge-smoke'], { encoding: 'utf8' }).stderr;
-const logLine = logs.split('\n').find((l) => l.includes('mosaicast-edge up')) ?? '';
 cleanup(); containers.length = 0;
 const errorLines = logs.split('\n').filter((l) => /level=ERROR/.test(l));
 
@@ -832,7 +841,7 @@ const failed = results.filter((r) => r.result.includes('FAIL')).length;
 const skipped = results.filter((r) => r.result === 'SKIP' && !covered(r)).length;
 const byCoreN = results.filter(covered).length;
 console.log(`\n### Edge rehearsal — ${new Date().toISOString().slice(0, 16)}Z`); // the harness's own clock, for the report
-console.log(`image mosaicast-edge:rehearsal (${logLine.match(/build=(\S+)/)?.[1] ?? '?'}), core ${coreSHA.slice(0, 7)}, theme ${theme ? theme.split('/').at(-1) : 'default'}; read-only rootfs, 128 MiB, cache on a volume\n`);
+console.log(`image ${IMAGE} (${imageVersion}), core ${coreSHA.slice(0, 7)}, theme ${theme ? theme.split('/').at(-1) : 'default'}; read-only rootfs, 128 MiB, cache on a volume\n`);
 console.log('| # | check | result | detail |');
 console.log('|---|---|---|---|');
 results.forEach((r, i) => console.log(`| ${i + 1} | ${r.name} | ${covered(r) ? 'CORE' : r.result} | ${r.detail.replaceAll('|', '\\|')} |`));

@@ -29,7 +29,8 @@ source <(../mosaicast-core/dev/instance.sh --name edge env)   # MC_APP_URL etc. 
 dev/policy scheduled 70 | open-now | maintenance [secs] | closed | open | show | session <role>
 PW=~/.npm/_npx/e41f203b7505f1fb/node_modules/playwright node dev/smoke.mjs --theme <theme-dir> --restart-core
                            # the rehearsal: real image, every check, pass/fail table (~12 min);
-                           # --core-ref <tag|sha> moves core first, --only <regex> runs a subset
+                           # --core-ref <tag|sha> moves core first, --image <ref> tests a published
+                           # image, --only <regex> runs a subset
 ./tmp/edge preview --theme <dir>   # http://127.0.0.1:8090/_preview ; dev/go mounts only this repo, so
                                    # for paths outside it build tmp/edge and run it directly
 ```
