@@ -42,7 +42,7 @@ docker compose logs edge      # "mosaicast-edge up … build=<hash> theme=…"
 | `EDGE_UPSTREAM` | — (required; compose: `http://app:8080`) | core |
 | `EDGE_LISTEN` | `:8080` | |
 | `EDGE_CORE_TOKEN` | — | equal to core's `MOSAICAST_EDGE_TOKEN`; core's admin page then shows the edge as connected |
-| `EDGE_CACHE_DIR` | `/cache` in the image | last good policy + site copy; empty = memory only |
+| `EDGE_CACHE_DIR` | `/cache` in the image | last good policy, site copy, and the counts not yet taken by core (`stats.json`); empty = memory only |
 | `EDGE_THEME` | — | the theme: a folder, a `.tgz`/`.zip`, `https://…/theme.tgz` or `owner/repo@tag`, with `#sha256:<digest>` for downloads ([THEMING.md](docs/THEMING.md#deploying-a-theme)); empty = the default look |
 | `EDGE_THEME_DIR` | — | the older name for a theme folder (compose: set `EDGE_THEME_PATH` on the host) |
 | `EDGE_THEME_TOKEN` | — | GitHub token for a private theme repo: fine-grained, that one repo, Contents read-only, with an expiry; never logged |
@@ -54,6 +54,13 @@ docker compose logs edge      # "mosaicast-edge up … build=<hash> theme=…"
 | `EDGE_LONGPOLL_MAX` | `2500` | pages held open waiting for a change; beyond this they are answered at once and poll gently (every 3 s) |
 | `EDGE_MAX_CONNS` | `3500` | open connections; beyond this new ones wait to be accepted instead of costing memory |
 | `GOMEMLIMIT` | `96MiB` in the image | the Go runtime's memory target; keep it below the container's limit |
+
+**Counting** ([ARCHITECTURE §18.5, §19](docs/ARCHITECTURE.md#19-anonymous-counting)). With
+`EDGE_CORE_TOKEN` set, the edge reports to core every 30 s: how many pages are waiting, and per
+completed UTC hour how many edge pages were shown, by page kind. Counts, never people: no cookie, no
+storage in the browser, no IP or User-Agent kept; crawlers and requests with `Sec-GPC: 1` are left
+out. Admin → Site access switches it off (`edgeCounting`); the edge then deletes what it kept. A
+core without the report endpoint is asked again every 10 minutes and is otherwise harmless.
 
 Memory: about 8 MB idle plus about 21 KB per open connection (measured). The defaults fit the compose
 file's 128 MB limit with headroom; scale all three together for a bigger crowd.
