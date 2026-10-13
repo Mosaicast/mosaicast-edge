@@ -223,7 +223,7 @@ func Validate(def, ext *theme.Theme, now time.Time) error {
 		for _, lang := range p.candidates {
 			for _, v := range fixtureViews(page, now, opensAt, endsAt, down) {
 				r, _ := http.NewRequest(http.MethodGet, "http://edge.test/?lang="+lang, nil)
-				req := gate.Request{Page: page, View: v.view, Viewer: v.viewer, LoginError: v.loginError, LegalSlug: v.slug}
+				req := gate.Request{Page: page, View: v.view, Viewer: v.viewer, LoginError: v.loginError, LegalSlug: v.slug, Waiting: v.waiting}
 				if _, _, err := rd.Render(r, req); err != nil {
 					errs = append(errs, fmt.Errorf("page %s, %s, %s: %w", page, lang, v.name, err))
 				}
@@ -243,6 +243,7 @@ type fixtureView struct {
 	viewer     *gate.Viewer
 	loginError string
 	slug       string
+	waiting    gate.Waiting
 }
 
 func fixtureViews(page string, now, opensAt, endsAt, down time.Time) []fixtureView {
@@ -258,6 +259,9 @@ func fixtureViews(page string, now, opensAt, endsAt, down time.Time) []fixtureVi
 			{name: "wait", view: policy.View{Page: policy.Scheduled, Access: acc(policy.Scheduled, &opensAt, nil, true), CoreUp: true}},
 			{name: "final", view: policy.View{Page: policy.Scheduled, Access: acc(policy.Scheduled, &final, nil, false), CoreUp: true}},
 			{name: "wait, fan signed in", view: policy.View{Page: policy.Scheduled, Access: acc(policy.Scheduled, &opensAt, nil, false)}, viewer: &gate.Viewer{SignedIn: true, Role: policy.RoleFan}},
+			{name: "wait, one waiting", view: policy.View{Page: policy.Scheduled, Access: acc(policy.Scheduled, &opensAt, nil, true), CoreUp: true}, waiting: gate.Waiting{N: 1}},
+			{name: "wait, many waiting", view: policy.View{Page: policy.Scheduled, Access: acc(policy.Scheduled, &opensAt, nil, true), CoreUp: true}, waiting: gate.Waiting{N: 1234}},
+			{name: "wait, waiting at the limit", view: policy.View{Page: policy.Scheduled, Access: acc(policy.Scheduled, &opensAt, nil, true), CoreUp: true}, waiting: gate.Waiting{N: 2500, Capped: true}},
 		}
 	case gate.PageMaintenance:
 		return []fixtureView{

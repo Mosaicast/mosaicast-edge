@@ -100,6 +100,7 @@ type previewer struct {
 	gate    *gate.Gate
 	stamp   string // theme folder's file times, to notice edits
 	loadErr error
+	waiting gate.Waiting // the count the pages show; nobody really waits on a preview
 }
 
 // sync pulls the fake core's current state into the edge right away, instead of waiting for a poll.
@@ -121,7 +122,8 @@ func (p *previewer) reload() error {
 	roles := &core.Roles{Client: p.client, TTL: time.Second, NegativeTTL: time.Second, Max: 100,
 		Timeout: 2 * time.Second, PerClient: 1000, InFlight: 8, Now: time.Now}
 	r := pages.New(pages.Options{Default: def, Theme: ext, Site: p.keeper, View: p.store.View, Now: time.Now, Location: p.loc})
-	p.gate = gate.New(gate.Options{Upstream: p.upstream, Store: p.store, Roles: roles, Pages: r, Now: time.Now})
+	p.gate = gate.New(gate.Options{Upstream: p.upstream, Store: p.store, Roles: roles, Pages: r, Now: time.Now,
+		Waiting: func() gate.Waiting { p.mu.Lock(); defer p.mu.Unlock(); return p.waiting }})
 	return nil
 }
 
@@ -173,6 +175,11 @@ func (p *previewer) control(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/_preview/set" {
 		q := r.URL.Query()
 		p.core.set(q, p.loc)
+		if n, err := strconv.ParseInt(q.Get("waiting"), 10, 64); err == nil && n >= 0 {
+			p.mu.Lock()
+			p.waiting = gate.Waiting{N: n, Capped: q.Get("capped") == "1"}
+			p.mu.Unlock()
+		}
 		if v := q.Get("viewer"); v != "" {
 			if v == "none" {
 				http.SetCookie(w, &http.Cookie{Name: core.SessionCookie, Value: "", Path: "/", MaxAge: -1})
@@ -225,6 +232,14 @@ this machine.</p>
 <a href="/_preview/set?to=/_a/login%3Ferror%3Dsignups_closed">sign-in with an error</a>
 <a href="/_preview/set?providers=0&to=/_a/login">sign-in, no providers</a>
 <a href="/_preview/set?to=/_a/legal/imprint">legal page</a>
+<h2>Waiting count</h2>
+<p>Pages show it with <code>data-edge-count="waiting"</code>. It reaches open pages with the next state
+answer, so reload to see it at once.</p>
+<a href="/_preview/set?waiting=0&to=/_preview">0</a>
+<a href="/_preview/set?waiting=1&to=/_preview">1</a>
+<a href="/_preview/set?waiting=7&to=/_preview">7</a>
+<a href="/_preview/set?waiting=1234&to=/_preview">1,234</a>
+<a href="/_preview/set?waiting=2500&capped=1&to=/_preview">2,500+ (at the limit)</a>
 <h2>Site</h2>
 <a href="/_preview/set?mode=system&to=/_preview">mode: system</a>
 <a href="/_preview/set?mode=light&to=/_preview">mode: light</a>

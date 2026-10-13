@@ -85,6 +85,7 @@ func serve() int {
 		OnRevision: func() { keeper.Refresh(ctx) }}
 	go poller.Run(ctx)
 	go keeper.Run(ctx, cfg.siteRefresh)
+	go g.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              cfg.listen,

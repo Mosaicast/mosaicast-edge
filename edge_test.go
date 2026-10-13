@@ -151,6 +151,12 @@ type edge struct {
 
 func newEdge(t *testing.T, fc *fakeCore, c *clock, cacheDir string, themeDir ...string) *edge {
 	t.Helper()
+	return newEdgeWith(t, fc, c, cacheDir, nil, themeDir...)
+}
+
+// newEdgeWith is newEdge with a hook to change the gate's options.
+func newEdgeWith(t *testing.T, fc *fakeCore, c *clock, cacheDir string, tune func(*gate.Options), themeDir ...string) *edge {
+	t.Helper()
 	u, _ := url.Parse(fc.srv.URL)
 	dir := ""
 	if len(themeDir) > 0 {
@@ -166,7 +172,11 @@ func newEdge(t *testing.T, fc *fakeCore, c *clock, cacheDir string, themeDir ...
 	roles := &core.Roles{Client: client, TTL: 30 * time.Second, NegativeTTL: 10 * time.Second, Max: 100,
 		Timeout: 2 * time.Second, PerClient: 10, InFlight: 32, Now: c.now}
 	r := pages.New(pages.Options{Default: def, Theme: ext, Site: keeper, View: store.View, Now: c.now, Location: time.UTC})
-	g := gate.New(gate.Options{Upstream: u, Store: store, Roles: roles, Pages: r, Now: c.now, PollHold: 200 * time.Millisecond})
+	o := gate.Options{Upstream: u, Store: store, Roles: roles, Pages: r, Now: c.now, PollHold: 200 * time.Millisecond}
+	if tune != nil {
+		tune(&o)
+	}
+	g := gate.New(o)
 	e := &edge{gate: g, store: store, keeper: keeper, clock: c, core: fc,
 		poller: &core.Poller{Client: client, Store: store, Interval: time.Second}}
 	e.poll()
@@ -616,6 +626,81 @@ func TestStateLongPoll(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("long-poll did not wake on a policy change")
+	}
+}
+
+type stateWaiting struct {
+	Rev           uint64 `json:"rev"`
+	Waiting       int64  `json:"waiting"`
+	WaitingCapped bool   `json:"waitingCapped"`
+}
+
+func (e *edge) state(t *testing.T, target string) stateWaiting {
+	t.Helper()
+	var s stateWaiting
+	if err := json.Unmarshal(e.do("GET", target, nil).Body.Bytes(), &s); err != nil {
+		t.Error(err) // not Fatal: called from goroutines too
+	}
+	return s
+}
+
+// The waiting count is the held long-polls: it reaches pages with every answer, never wakes them, and
+// stops at the long-poll limit.
+func TestWaitingCount(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	e := newEdgeWith(t, fc, &clock{t: t0}, "", func(o *gate.Options) { o.MaxWaiters = 3; o.PollHold = 5 * time.Second })
+	first := e.state(t, "/_a/state")
+	if first.Waiting != 0 || first.WaitingCapped {
+		t.Fatalf("nobody yet: %+v", first)
+	}
+	hold := fmt.Sprintf("/_a/state?rev=%d", first.Rev)
+	answered := make(chan stateWaiting, 4)
+	for range 2 {
+		go func() { answered <- e.state(t, hold) }()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for e.state(t, "/_a/state").Waiting != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("two held long-polls never showed as 2 waiting")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case s := <-answered:
+		t.Fatalf("a change in the count woke a long-poll: %+v", s)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	go func() { answered <- e.state(t, hold) }() // the third is held: the limit is 3
+	for e.state(t, "/_a/state").Waiting != 3 {
+		if time.Now().After(deadline) {
+			t.Fatal("the third long-poll never showed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	over := e.state(t, hold) // the fourth is beyond the limit: answered at once, the page polls on a timer
+	if over.Rev != first.Rev || over.Waiting != 3 || !over.WaitingCapped {
+		t.Fatalf("beyond the limit: %+v", over)
+	}
+	page := e.do("GET", "/", map[string]string{"Accept": html}).Body.String()
+	for _, want := range []string{`data-waiting="3" data-waiting-capped`, `"waiting":3,"waitingCapped":true`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("countdown page lacks %s", want)
+		}
+	}
+
+	fc.setAccess(scheduled(t0.Add(2 * time.Hour)))
+	e.poll()
+	for range 3 {
+		select {
+		case s := <-answered:
+			if s.Rev == first.Rev {
+				t.Errorf("woken without a new rev: %+v", s)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("a policy change did not wake every long-poll")
+		}
 	}
 }
 

@@ -48,6 +48,8 @@ Never `pkill -f` the server (matches the tool's own shell); use `tmp/edge.pid`.
 - `internal/core` — HTTP client; `Poller` (2 s, ETag/304; core down only after 2 failed polls in a row; any other status, 404 included, keeps the last good policy: a 404 means a wrong upstream, never "open"); `Roles` (`/api/me`: cookie shape
   check `LooksLikeSession`, PAT `TokenRole` (`LooksLikeToken`, `BearerToken`; gate caps admin → podcaster), per-IP token bucket, in-flight cap, 30 s / 10 s negative cache, fail closed),
   `ClientIP`.
+- `internal/stats` — counts, never people (§19): `Gauge` (the waiting count: max of the last 30 s of held
+  long-polls, clamped to the long-poll limit → capped). Never part of `Seq`: a count change wakes nobody.
 - `internal/sitecopy` — copy of `/api/site` tokens, branding images, legal pages per locale; disk cache.
 - `internal/gate` — root handler: `/_a/*`, OAuth pass-through, open → proxy, cookie → role check,
   pages with the edge's HTTP semantics (503 + Retry-After, plain 503 for non-HTML/non-GET),

@@ -234,3 +234,36 @@ func TestWhenPlaceholderFollowsThePolicy(t *testing.T) {
 		t.Errorf("scheduled but already open: %q", got)
 	}
 }
+
+func TestWaitingText(t *testing.T) {
+	ext := extTheme(t, fstest.MapFS{
+		"theme.json":       {Data: []byte(`{"schema":1,"name":"W","locales":["en","de"],"pages":{"countdown":{"mode":"full","template":"c.html"}}}`)},
+		"templates/c.html": {Data: []byte(`<html {{.HTMLAttrs}}><head>{{.EdgeHead}}</head><body><p data-edge-count-text="waiting">{{.WaitingText}}</p></body></html>`)},
+	})
+	if err := Validate(defaultTheme(t), ext, now); err != nil {
+		t.Fatal(err)
+	}
+	rd := renderer(defaultTheme(t), ext)
+	for _, c := range []struct {
+		lang string
+		w    gate.Waiting
+		want string
+	}{
+		{"en", gate.Waiting{N: 0}, ">0 are waiting<"},
+		{"en", gate.Waiting{N: 1}, ">1 is waiting<"},
+		{"en", gate.Waiting{N: 1234}, ">1,234 are waiting<"},
+		{"de", gate.Waiting{N: 1234567}, ">1.234.567 warten<"},
+		{"de", gate.Waiting{N: 1}, ">1 wartet<"},
+		{"en", gate.Waiting{N: 2500, Capped: true}, ">2,500&#43; are waiting<"},
+		{"en", gate.Waiting{N: 1, Capped: true}, ">1&#43; are waiting<"},
+	} {
+		body, _, err := rd.Render(httptest.NewRequest("GET", "/?lang="+c.lang, nil),
+			gate.Request{Page: gate.PageCountdown, View: scheduledView(now.Add(time.Hour), true), Waiting: c.w})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), c.want) {
+			t.Errorf("%s %+v: want %s", c.lang, c.w, c.want)
+		}
+	}
+}
