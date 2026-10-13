@@ -951,6 +951,140 @@ if (theme && !flag('--skip-expiry')) {
   });
 }
 
+// ---------- counting (§18.5, §19) ----------
+// Its own edge (long-poll limit 5, the minimal example theme) in front of the same core; the main edge
+// is paused meanwhile, so the waiting count and the hours core shows are this edge's alone.
+{
+  const CPORT = PORT + 7;
+  const CEDGE = `http://127.0.0.1:${CPORT}`;
+  const name = 'edge-count';
+  const vol = `${name}-cache`;
+  const busybox = (...a) => spawnSync('docker', ['run', '--rm', '-u', '65532:65532', '-v', `${vol}:/c`, 'busybox:1.37', ...a], { encoding: 'utf8' });
+  const statsFile = () => { const r = busybox('cat', '/c/stats.json'); return r.status === 0 ? JSON.parse(r.stdout) : null; };
+  const metrics = async (q = '') => {
+    const r = await fetch(`${coreURL.origin}/api/admin/metrics${q}`, { headers: cookie(sessions.admin) });
+    return r.status === 404 ? null : r.json();
+  };
+  const until = async (what, pred, ms) => {
+    const end = performance.now() + ms;
+    let last;
+    while (performance.now() < end) {
+      last = await what();
+      if (pred(last)) return last;
+      await sleep(1000);
+    }
+    throw new Error(`waited ${ms / 1000}s, last ${JSON.stringify(last)}`);
+  };
+  // n pages that keep a long-poll held, as the runtime does; stop() lets them go
+  const holders = [];
+  const hold = (n, headers = {}) => {
+    for (let i = 0; i < n; i++) {
+      const h = { stopped: false, req: null };
+      const loop = async () => {
+        while (!h.stopped) {
+          const rev = (await edgeState(CEDGE)).rev;
+          await new Promise((res) => {
+            h.req = http.request({ host: '127.0.0.1', port: CPORT, path: `/_a/state?rev=${rev}`, headers }, (r) => { r.resume(); r.on('end', res); });
+            h.req.on('error', res);
+            h.req.end();
+          });
+          if (!h.stopped) await sleep(200);
+        }
+      };
+      loop();
+      holders.push(h);
+    }
+  };
+  const release = () => { for (const h of holders.splice(0)) { h.stopped = true; h.req?.destroy(); } };
+  const browserUA = { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0', Accept: 'text/html' };
+
+  const hasReport = (await metrics()) !== null;
+  const hour = new Date(); hour.setUTCMinutes(0, 0, 0);
+  const hourISO = (h) => new Date(hour.getTime() + h * 3600_000).toISOString().replace('.000Z', 'Z');
+  if (hasReport) {
+    spawnSync('docker', ['pause', 'edge-smoke']);
+    policyWith({ EDGE_COUNTING: 'true' }, 'scheduled', '3600');
+    // a first start initialises the volume with the image's owner; then the seed goes in
+    startEdge(name, CPORT, resolve(repo, 'examples/minimal'), { EDGE_LONGPOLL_MAX: '5' });
+    await healthy(CEDGE);
+    sh('docker', ['stop', '-t', '10', name]);
+    const seed = { version: 1, running: { start: hourISO(0), views: { countdown: 5 } },
+      pending: [{ start: hourISO(-3), views: { countdown: 7, legal: 2 } }] };
+    busybox('sh', '-c', `echo '${JSON.stringify(seed)}' > /c/stats.json`);
+    sh('docker', ['start', name]);
+    await healthy(CEDGE);
+  }
+
+  await check('counting: the waiting count on the page and in core, GPC pages left out of core\'s, "5+" at the limit', async () => {
+    if (!hasReport) skip('core without §18.5 (/api/admin/metrics)');
+    hold(2);
+    hold(1, { 'Sec-GPC': '1' });
+    await until(() => edgeState(CEDGE), (s) => s.waiting === 3, 10_000);
+    const ctx2 = await browser.newContext({ locale: 'en-GB' });
+    const p2 = await ctx2.newPage();
+    await p2.goto(CEDGE + '/');
+    const shown = await p2.evaluate(() => { const el = document.querySelector('.mx-waiting'); return { hidden: el?.hidden, text: el?.textContent }; });
+    await ctx2.close();
+    expect(shown.hidden === false && /^[3-4] are waiting$/.test(shown.text), `theme element: ${JSON.stringify(shown)}`);
+    const core = await until(metrics, (m) => m.edge?.waiting === 2 && !m.edge.waitingCapped, 90_000);
+    hold(4);
+    const capped = await until(() => edgeState(CEDGE), (s) => s.waiting === 5 && s.waitingCapped, 10_000);
+    const coreCapped = await until(metrics, (m) => m.edge?.waitingCapped === true, 45_000);
+    release();
+    return `page "${shown.text}"; core ${core.edge.waiting} (3 held, 1 with GPC); at the limit /_a/state ${capped.waiting}+, core capped=${coreCapped.edge.waitingCapped}, peak this policy ${coreCapped.edge.peakThisPolicy}`;
+  });
+
+  await check('counting: a completed hour kept across a restart reaches core and is acknowledged; the running hour carries on; crawler, GPC, HEAD not counted', async () => {
+    if (!hasReport) skip('core without §18.5 (/api/admin/metrics)');
+    for (let i = 0; i < 2; i++) await get('/', browserUA, 'GET', CPORT);
+    await get('/', { ...browserUA, 'User-Agent': 'Slackbot-LinkExpanding 1.0' }, 'GET', CPORT);
+    await get('/', { ...browserUA, 'Sec-GPC': '1' }, 'GET', CPORT);
+    await get('/', browserUA, 'HEAD', CPORT);
+    const from = hourISO(-3); const to = hourISO(-2);
+    const m = await until(() => metrics(`?from=${from}&to=${to}`), (x) => (x.edgeViews ?? []).some((v) => v.subject.endsWith('countdown') && v.count === 7), 45_000);
+    const views = Object.fromEntries(m.edgeViews.map((v) => [v.subject, v.count]));
+    // written every 30 s: wait for the two views to be in the file, the seeded hour gone from it
+    const turned = () => new Date().getUTCHours() !== hour.getUTCHours();
+    const f = await until(async () => statsFile(), (x) => x && x.pending.length === 0 && (turned() || x.running?.views?.countdown === 7), 45_000)
+      .catch((e) => { throw new Error(`running hour: 5 seeded + 2 counted; ${e.message}`); });
+    const running = f.running?.start === hourISO(0) ? f.running.views.countdown : null;
+    sh('docker', ['restart', '-t', '10', name]);
+    await healthy(CEDGE);
+    const after = statsFile();
+    if (running !== null && after.running?.start === hourISO(0)) expect(after.running.views.countdown === 7, `after a restart: ${JSON.stringify(after.running)}`);
+    return `core has ${JSON.stringify(views)} for ${from}; acknowledged (pending empty); running hour ${running ?? '(the hour turned)'}, the same after a restart`;
+  });
+
+  await check('counting: edgeCounting off deletes stats.json and sends nothing; the page keeps its waiting count; on again counts afresh', async () => {
+    if (!hasReport) skip('core without §18.5 (/api/admin/metrics)');
+    policyWith({ EDGE_COUNTING: 'false' }, 'scheduled', '3600');
+    await until(async () => busybox('test', '-e', '/c/stats.json').status, (st) => st !== 0, 45_000);
+    await get('/', browserUA, 'GET', CPORT);
+    const before = (await metrics()).edge.waitingAt;
+    await sleep(35_000);
+    const still = busybox('test', '-e', '/c/stats.json').status !== 0;
+    const after = (await metrics()).edge;
+    expect(still, 'stats.json came back while off');
+    expect(after.waitingAt === before, `a report arrived while off (${before} → ${after.waitingAt})`);
+    expect(after.counting === false, 'core shows edge counting off');
+    hold(1);
+    const s = await until(() => edgeState(CEDGE), (x) => x.waiting === 1, 10_000);
+    release();
+    policyWith({ EDGE_COUNTING: 'true' }, 'scheduled', '3600');
+    await settle();
+    await get('/', browserUA, 'GET', CPORT);
+    const f = await until(async () => statsFile(), (x) => x?.running?.views?.countdown === 1, 45_000);
+    return `off: file gone, no report for 35 s, /_a/state waiting=${s.waiting}; on: counting from ${f.running.views.countdown}`;
+  });
+
+  release();
+  if (hasReport) {
+    spawnSync('docker', ['rm', '-f', name]); spawnSync('docker', ['volume', 'rm', '-f', vol]);
+    containers.splice(containers.indexOf(name), 1);
+    spawnSync('docker', ['unpause', 'edge-smoke']);
+  }
+}
+
 // ---------- done ----------
 policy('open');
 await browser.close();

@@ -16,6 +16,7 @@ COPY *.go ./
 COPY internal ./internal
 COPY web ./web
 COPY examples ./examples
+COPY docs/ARCHITECTURE.md ./docs/ARCHITECTURE.md
 RUN CGO_ENABLED=0 go test ./... \
  && CGO_ENABLED=0 go run . check-theme examples/minimal \
  && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /mosaicast-edge . \
