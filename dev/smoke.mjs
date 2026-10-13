@@ -961,8 +961,9 @@ if (theme && !flag('--skip-expiry')) {
   const vol = `${name}-cache`;
   const busybox = (...a) => spawnSync('docker', ['run', '--rm', '-u', '65532:65532', '-v', `${vol}:/c`, 'busybox:1.37', ...a], { encoding: 'utf8' });
   const statsFile = () => { const r = busybox('cat', '/c/stats.json'); return r.status === 0 ? JSON.parse(r.stdout) : null; };
+  const admin = policy('session', 'admin'); // fresh: a core restart earlier in the run ends older sessions
   const metrics = async (q = '') => {
-    const r = await fetch(`${coreURL.origin}/api/admin/metrics${q}`, { headers: cookie(sessions.admin) });
+    const r = await fetch(`${coreURL.origin}/api/admin/metrics${q}`, { headers: cookie(admin) });
     return r.status === 404 ? null : r.json();
   };
   const until = async (what, pred, ms) => {
