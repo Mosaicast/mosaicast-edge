@@ -41,6 +41,12 @@ type Access struct {
 	StaffLogin     StaffLogin `json:"staffLogin"`
 	Now            *time.Time `json:"now,omitempty"` // core's clock: informational only, never used to decide
 	Revision       int64      `json:"revision"`
+	EdgeCounting   *bool      `json:"edgeCounting,omitempty"` // §18.1; absent (an older core) = on
+}
+
+// Counting reports whether the edge may count (§18.5, §19).
+func (a *Access) Counting() bool {
+	return a.EdgeCounting == nil || *a.EdgeCounting
 }
 
 // StaffLogin says whether the pages link the staff sign-in, and where each provider's flow starts.
