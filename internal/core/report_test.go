@@ -223,3 +223,35 @@ func TestReportOnShutdown(t *testing.T) {
 		t.Error("the running hour is kept on shutdown")
 	}
 }
+
+// Hours core keeps refusing do not hold up the gauge: after three 400s it goes alone, and the hours are
+// tried again every 10 minutes.
+func TestReportSendsTheGaugeAloneAfterRefusals(t *testing.T) {
+	f := newFixture(t, "tok")
+	f.views.Count(stats.Countdown)
+	f.add(time.Hour)
+	f.views.Tick()
+	f.core.mu.Lock()
+	f.core.status = http.StatusBadRequest
+	f.core.mu.Unlock()
+	for range 3 {
+		f.rep.Tick(context.Background())
+	}
+	f.core.mu.Lock()
+	f.core.status = 0
+	f.core.mu.Unlock()
+	f.rep.Tick(context.Background())
+	r := f.core.reports()
+	if len(r) != 4 || len(r[2].Hours) != 1 || len(r[3].Hours) != 0 || r[3].Waiting != 1234 {
+		t.Fatalf("after three refusals: %d reports, last %+v", len(r), r[len(r)-1])
+	}
+	f.add(11 * time.Minute)
+	f.rep.Tick(context.Background())
+	if r = f.core.reports(); len(r[4].Hours) != 1 || len(f.views.Pending(48)) != 0 {
+		t.Errorf("the hours are tried again after 10 min: %+v", r[4])
+	}
+	f.rep.Tick(context.Background())
+	if r = f.core.reports(); len(r) != 6 {
+		t.Error("back to normal")
+	}
+}

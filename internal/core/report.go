@@ -100,9 +100,16 @@ type Reporter struct {
 	Every    time.Duration                 // 0 = 30 s
 	Now      func() time.Time
 
-	retryAt time.Time // after a 401/404: not before
-	state   string    // the last outcome logged, so a state is logged once, not every tick
+	retryAt      time.Time // after a 401/404: not before
+	refused      int       // 400s in a row for a report with hours
+	hoursRetryAt time.Time // after refusedLimit of them: the gauge alone until then
+	state        string    // the last outcome logged, so a state is logged once, not every tick
 }
+
+// refusedLimit is how many 400s in a row for a report with hours make the reporter send the gauge
+// alone, so "waiting now" keeps reaching core while an hour core will not take waits (it is tried
+// again every retryAfter, and leaves with the week-old hours at the latest).
+const refusedLimit = 3
 
 // retryAfter is how long a 401 or 404 waits: core has no endpoint or token yet, or a wrong one.
 const retryAfter = 10 * time.Minute
@@ -136,14 +143,25 @@ func (r *Reporter) Tick(ctx context.Context) {
 	}
 	for range 4 { // a backlog goes out in batches, not one batch every 30 s
 		hours := r.Views.Pending(MaxHoursPerReport)
+		if r.refused >= refusedLimit && r.Now().Before(r.hoursRetryAt) {
+			hours = nil
+		}
 		n, capped := r.Waiting()
 		through, err := r.Client.Report(ctx, Report{Waiting: n, WaitingCapped: capped, PolicyRevision: r.Revision(), Hours: hours})
 		r.outcome(err)
+		if errors.Is(err, ErrRefused) && len(hours) > 0 {
+			if r.refused++; r.refused >= refusedLimit {
+				r.hoursRetryAt = r.Now().Add(retryAfter)
+			}
+		}
 		if err != nil {
 			if errors.Is(err, errUnauthorized) || errors.Is(err, ErrNotFound) {
 				r.retryAt = r.Now().Add(retryAfter)
 			}
 			return
+		}
+		if len(hours) > 0 {
+			r.refused = 0
 		}
 		if len(hours) > 0 && !through.IsZero() {
 			r.Views.Ack(hours, through)
