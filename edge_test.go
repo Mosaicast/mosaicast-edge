@@ -707,6 +707,38 @@ func TestWaitingCount(t *testing.T) {
 	}
 }
 
+// A shutdown answers the held long-polls at once instead of waiting out their hold, and holds no more.
+func TestStopAnswersHeldLongPolls(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	e := newEdgeWith(t, fc, &clock{t: t0}, "", func(o *gate.Options) { o.PollHold = time.Minute })
+	rev := e.state(t, "/_a/state").Rev
+	hold := fmt.Sprintf("/_a/state?rev=%d", rev)
+	answered := make(chan stateWaiting, 1)
+	go func() { answered <- e.state(t, hold) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for e.state(t, "/_a/state").Waiting != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the long-poll was never held")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	e.gate.Stop()
+	select {
+	case s := <-answered:
+		if s.Rev != rev {
+			t.Errorf("answered with the same state: %+v", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not answer the held long-poll")
+	}
+	start := time.Now()
+	e.state(t, hold)
+	if time.Since(start) > time.Second {
+		t.Error("a long-poll after Stop was held")
+	}
+}
+
 func TestPolicyCacheSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	fc := newFakeCore(t)

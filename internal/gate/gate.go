@@ -97,6 +97,8 @@ type Gate struct {
 	pollHold   time.Duration
 	gauge      *stats.Gauge
 	waiting    func() Waiting
+	stopping   context.Context // done once the edge shuts down: held long-polls are answered
+	stop       context.CancelFunc
 }
 
 // Options configure a gate.
@@ -122,6 +124,7 @@ func New(o Options) *Gate {
 	if g.pollHold == 0 {
 		g.pollHold = 25 * time.Second
 	}
+	g.stopping, g.stop = context.WithCancel(context.Background())
 	g.gauge = stats.NewGauge(g.waiters.Load, g.maxWaiters, gaugeWindow)
 	g.waiting = o.Waiting
 	if g.waiting == nil {
@@ -168,6 +171,12 @@ const (
 // Run keeps the waiting count's samples until ctx ends.
 func (g *Gate) Run(ctx context.Context) {
 	g.gauge.Run(ctx, gaugeEvery)
+}
+
+// Stop answers every held long-poll and holds no new ones, so a shutdown is not kept waiting by pages
+// that would otherwise sit out the rest of their hold. The pages poll again and find the edge back.
+func (g *Gate) Stop() {
+	g.stop()
 }
 
 func defaultTransport() *http.Transport {
@@ -393,9 +402,11 @@ func (g *Gate) serveState(w http.ResponseWriter, r *http.Request) {
 	v := g.store.View()
 	if raw := r.URL.Query().Get("rev"); raw != "" {
 		if rev, err := strconv.ParseUint(raw, 10, 64); err == nil && rev == v.Seq {
-			if g.waiters.Add(1) <= g.maxWaiters {
+			if g.waiters.Add(1) <= g.maxWaiters && g.stopping.Err() == nil {
 				ctx, cancel := context.WithTimeout(r.Context(), g.pollHold)
+				unhook := context.AfterFunc(g.stopping, cancel)
 				v = g.store.Wait(ctx, rev)
+				unhook()
 				cancel()
 			}
 			g.waiters.Add(-1)

@@ -104,6 +104,7 @@ func serve() int {
 
 	go func() {
 		<-ctx.Done()
+		g.Stop()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
