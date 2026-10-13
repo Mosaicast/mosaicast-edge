@@ -26,6 +26,7 @@ import (
 	"github.com/Mosaicast/mosaicast-edge/internal/pages"
 	"github.com/Mosaicast/mosaicast-edge/internal/policy"
 	"github.com/Mosaicast/mosaicast-edge/internal/sitecopy"
+	"github.com/Mosaicast/mosaicast-edge/internal/stats"
 )
 
 var t0 = time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
@@ -151,6 +152,12 @@ type edge struct {
 
 func newEdge(t *testing.T, fc *fakeCore, c *clock, cacheDir string, themeDir ...string) *edge {
 	t.Helper()
+	return newEdgeWith(t, fc, c, cacheDir, nil, themeDir...)
+}
+
+// newEdgeWith is newEdge with a hook to change the gate's options.
+func newEdgeWith(t *testing.T, fc *fakeCore, c *clock, cacheDir string, tune func(*gate.Options), themeDir ...string) *edge {
+	t.Helper()
 	u, _ := url.Parse(fc.srv.URL)
 	dir := ""
 	if len(themeDir) > 0 {
@@ -166,7 +173,11 @@ func newEdge(t *testing.T, fc *fakeCore, c *clock, cacheDir string, themeDir ...
 	roles := &core.Roles{Client: client, TTL: 30 * time.Second, NegativeTTL: 10 * time.Second, Max: 100,
 		Timeout: 2 * time.Second, PerClient: 10, InFlight: 32, Now: c.now}
 	r := pages.New(pages.Options{Default: def, Theme: ext, Site: keeper, View: store.View, Now: c.now, Location: time.UTC})
-	g := gate.New(gate.Options{Upstream: u, Store: store, Roles: roles, Pages: r, Now: c.now, PollHold: 200 * time.Millisecond})
+	o := gate.Options{Upstream: u, Store: store, Roles: roles, Pages: r, Now: c.now, PollHold: 200 * time.Millisecond}
+	if tune != nil {
+		tune(&o)
+	}
+	g := gate.New(o)
 	e := &edge{gate: g, store: store, keeper: keeper, clock: c, core: fc,
 		poller: &core.Poller{Client: client, Store: store, Interval: time.Second}}
 	e.poll()
@@ -376,7 +387,10 @@ func TestTokenCheck(t *testing.T) {
 	}
 	bearer := func(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
 
-	for n, want := range map[int]bool{1: true, 2: true, 3: false, 4: false} {
+	for n, want := range []bool{1: true, 2: true, 3: false, 4: false} { // in order: token 2 is the last to pass
+		if n == 0 {
+			continue
+		}
 		w := upload(bearer(pat(n)))
 		if passed := w.Header().Get("X-Upstream") == "core"; passed != want {
 			t.Errorf("token %d: passed=%v, want %v", n, passed, want)
@@ -617,6 +631,200 @@ func TestStateLongPoll(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("long-poll did not wake on a policy change")
 	}
+}
+
+type stateWaiting struct {
+	Rev           uint64 `json:"rev"`
+	Waiting       int64  `json:"waiting"`
+	WaitingCapped bool   `json:"waitingCapped"`
+}
+
+func (e *edge) state(t *testing.T, target string) stateWaiting {
+	t.Helper()
+	var s stateWaiting
+	if err := json.Unmarshal(e.do("GET", target, nil).Body.Bytes(), &s); err != nil {
+		t.Error(err) // not Fatal: called from goroutines too
+	}
+	return s
+}
+
+// The waiting count is the held long-polls: it reaches pages with every answer, never wakes them, and
+// stops at the long-poll limit.
+func TestWaitingCount(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	e := newEdgeWith(t, fc, &clock{t: t0}, "", func(o *gate.Options) { o.MaxWaiters = 3; o.PollHold = 5 * time.Second })
+	first := e.state(t, "/_a/state")
+	if first.Waiting != 0 || first.WaitingCapped {
+		t.Fatalf("nobody yet: %+v", first)
+	}
+	hold := fmt.Sprintf("/_a/state?rev=%d", first.Rev)
+	answered := make(chan stateWaiting, 4)
+	for range 2 {
+		go func() { answered <- e.state(t, hold) }()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for e.state(t, "/_a/state").Waiting != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("two held long-polls never showed as 2 waiting")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case s := <-answered:
+		t.Fatalf("a change in the count woke a long-poll: %+v", s)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	go func() { answered <- e.state(t, hold) }() // the third is held: the limit is 3
+	for e.state(t, "/_a/state").Waiting != 3 {
+		if time.Now().After(deadline) {
+			t.Fatal("the third long-poll never showed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	over := e.state(t, hold) // the fourth is beyond the limit: answered at once, the page polls on a timer
+	if over.Rev != first.Rev || over.Waiting != 3 || !over.WaitingCapped {
+		t.Fatalf("beyond the limit: %+v", over)
+	}
+	page := e.do("GET", "/", map[string]string{"Accept": html}).Body.String()
+	for _, want := range []string{`data-waiting="3" data-waiting-capped`, `"waiting":3,"waitingCapped":true`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("countdown page lacks %s", want)
+		}
+	}
+
+	fc.setAccess(scheduled(t0.Add(2 * time.Hour)))
+	e.poll()
+	for range 3 {
+		select {
+		case s := <-answered:
+			if s.Rev == first.Rev {
+				t.Errorf("woken without a new rev: %+v", s)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("a policy change did not wake every long-poll")
+		}
+	}
+}
+
+// A shutdown answers the held long-polls at once instead of waiting out their hold, and holds no more.
+func TestStopAnswersHeldLongPolls(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	e := newEdgeWith(t, fc, &clock{t: t0}, "", func(o *gate.Options) { o.PollHold = time.Minute })
+	rev := e.state(t, "/_a/state").Rev
+	hold := fmt.Sprintf("/_a/state?rev=%d", rev)
+	answered := make(chan stateWaiting, 1)
+	go func() { answered <- e.state(t, hold) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for e.state(t, "/_a/state").Waiting != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the long-poll was never held")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	e.gate.Stop()
+	select {
+	case s := <-answered:
+		if s.Rev != rev {
+			t.Errorf("answered with the same state: %+v", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not answer the held long-poll")
+	}
+	start := time.Now()
+	e.state(t, hold)
+	if time.Since(start) > time.Second {
+		t.Error("a long-poll after Stop was held")
+	}
+}
+
+// Views are rendered edge pages for a GET, per page kind; not a HEAD, a redirect, a 404, a plain 503,
+// a proxied request, a crawler or a request with Sec-GPC (§18.5, §19).
+func TestViewsCounted(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	c := &clock{t: t0.Add(time.Minute)}
+	var views *stats.Views
+	e := newEdgeWith(t, fc, c, "", func(o *gate.Options) {
+		views = stats.NewViews(stats.ViewsOptions{Now: c.now, On: o.Store.Counting})
+		o.Views = views
+	})
+	browser := "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+	page := map[string]string{"Accept": html, "User-Agent": browser}
+	with := func(k, v string) map[string]string {
+		h := map[string]string{k: v}
+		for k, v := range page {
+			if _, set := h[k]; !set {
+				h[k] = v
+			}
+		}
+		return h
+	}
+	e.do("GET", "/", page)                                    // countdown
+	e.do("GET", "/some/where", page)                          // countdown
+	e.do("HEAD", "/", page)                                   // not: HEAD
+	e.do("GET", "/", with("User-Agent", "Discordbot/2.0"))    // not: crawler
+	e.do("GET", "/", with("User-Agent", ""))                  // not: no User-Agent
+	e.do("GET", "/", with("Sec-GPC", "1"))                    // not: GPC
+	e.do("GET", "/api/x", with("Accept", "application/json")) // not: plain 503
+	e.do("GET", "/legal/impressum", page)                     // not: a redirect
+	e.do("GET", "/_a/legal/impressum", page)                  // legal
+	e.do("GET", "/_a/legal/nope", page)                       // not: 404
+	e.do("GET", "/_a/login", page)                            // login
+	e.do("GET", "/_a/state", page)                            // not: a page
+
+	fc.setAccess(`{"state":"maintenance","passFloor":"podcaster","staffLogin":{"visible":false,"providers":[]},"revision":2}`)
+	e.poll()
+	e.do("GET", "/", page) // maintenance, a 503 page
+	fc.setAccess(`{"state":"open","passFloor":"podcaster","staffLogin":{"visible":false,"providers":[]},"revision":3}`)
+	e.poll()
+	e.do("GET", "/", page) // not: proxied to core, which counts its own
+
+	c.add(time.Hour)
+	views.Tick()
+	p := views.Pending(48)
+	if len(p) != 1 {
+		t.Fatalf("one completed hour, got %+v", p)
+	}
+	want := map[string]int64{"countdown": 2, "maintenance": 1, "closed": 0, "unavailable": 0, "login": 1, "legal": 1}
+	for k, n := range want {
+		if p[0].Views[k] != n {
+			t.Errorf("%s: %d, want %d (all: %v)", k, p[0].Views[k], n, p[0].Views)
+		}
+	}
+
+	off := `{"state":"closed","passFloor":"podcaster","staffLogin":{"visible":false,"providers":[]},"revision":4,"edgeCounting":false}`
+	fc.setAccess(off)
+	e.poll()
+	e.do("GET", "/", page)
+	c.add(time.Hour)
+	views.Tick()
+	if p := views.Pending(48); len(p) != 0 {
+		t.Errorf("edgeCounting off: nothing counted or kept, got %+v", p)
+	}
+}
+
+// Pages that send Sec-GPC are on the page's own count but left out of what core gets.
+func TestReportedWaitingLeavesOutGPC(t *testing.T) {
+	fc := newFakeCore(t)
+	fc.setAccess(scheduled(t0.Add(time.Hour)))
+	e := newEdgeWith(t, fc, &clock{t: t0}, "", func(o *gate.Options) { o.PollHold = 5 * time.Second })
+	hold := fmt.Sprintf("/_a/state?rev=%d", e.state(t, "/_a/state").Rev)
+	go e.do("GET", hold, nil)
+	go e.do("GET", hold, map[string]string{"Sec-GPC": "1"})
+	deadline := time.Now().Add(2 * time.Second)
+	for e.state(t, "/_a/state").Waiting != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("two held long-polls never showed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if w := e.gate.Reported(); w.N != 1 || w.Capped {
+		t.Errorf("reported to core: %+v, want 1 (the GPC page left out)", w)
+	}
+	e.gate.Stop()
 }
 
 func TestPolicyCacheSurvivesRestart(t *testing.T) {

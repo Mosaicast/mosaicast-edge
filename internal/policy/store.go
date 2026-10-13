@@ -121,22 +121,43 @@ func (s *Store) Wait(ctx context.Context, seq uint64) View {
 }
 
 // Set installs a freshly polled policy (and the ETag it came with) and records that core answered.
+// It wakes the pages only for what they react to; any other change (a new revision, the staff link,
+// the pass floor, edge counting) is kept and cached without making every page on screen poll again.
 func (s *Store) Set(a *Access, etag string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := !reflect.DeepEqual(withoutNow(s.access), withoutNow(a))
+	wake := !sameForPages(s.access, a)
+	changed := wake || !reflect.DeepEqual(withoutNow(s.access), withoutNow(a))
 	s.access, s.etag = a, etag
 	if !s.coreUp {
 		s.coreUp, s.downSince = true, nil
-		changed = true
+		wake = true
 	}
-	if flipped := s.observe(); changed && !flipped {
+	if flipped := s.observe(); wake && !flipped {
 		s.bump()
 	}
 	s.armFlip()
 	if changed {
 		s.persist()
 	}
+}
+
+// sameForPages reports whether two policies look the same to a page on screen, which follows the
+// state and its two moments (edge.js onState) and nothing else.
+func sameForPages(a, b *Access) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	same := func(x, y *time.Time) bool { return x == nil && y == nil || x != nil && y != nil && x.Equal(*y) }
+	return a.State == b.State && same(a.OpensAt, b.OpensAt) && same(a.EndsAt, b.EndsAt)
+}
+
+// Counting reports whether the edge may count (§18.5): only under a known policy that allows it. With
+// none yet (a first start with core unreachable) it does not.
+func (s *Store) Counting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.access != nil && s.access.Counting()
 }
 
 // ETag is what the next poll sends as If-None-Match.

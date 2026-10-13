@@ -19,6 +19,10 @@
   "unit.s.one": "second",
   "unit.s.other": "seconds",
 
+  "count.waiting.one": "{n} is waiting",
+  "count.waiting.other": "{n} are waiting",
+  "count.capped": "{n}+",
+
   "maintenance.title": "{site} is under maintenance",
   "maintenance.lead": "We are working on the site and will be back as soon as we are done.",
   "maintenance.until": "Planned until",

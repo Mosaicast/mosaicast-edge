@@ -25,6 +25,7 @@ import (
 	"github.com/Mosaicast/mosaicast-edge/internal/pages"
 	"github.com/Mosaicast/mosaicast-edge/internal/policy"
 	"github.com/Mosaicast/mosaicast-edge/internal/sitecopy"
+	"github.com/Mosaicast/mosaicast-edge/internal/stats"
 	"github.com/Mosaicast/mosaicast-edge/internal/theme"
 	"github.com/Mosaicast/mosaicast-edge/internal/themesrc"
 	"github.com/Mosaicast/mosaicast-edge/web"
@@ -76,8 +77,9 @@ func serve() int {
 		Timeout: 2 * time.Second, PerClient: 10, InFlight: 32, Now: time.Now}
 	renderer := pages.New(pages.Options{Default: def, Theme: ext, Site: keeper, View: store.View, Now: time.Now,
 		Location: cfg.location, PublicURL: cfg.publicURL})
+	views := stats.NewViews(stats.ViewsOptions{Now: time.Now, On: store.Counting, Dir: cfg.cacheDir})
 	g := gate.New(gate.Options{Upstream: cfg.upstream, Store: store, Roles: roles, Pages: renderer, Now: time.Now,
-		MaxWaiters: cfg.longPollMax})
+		MaxWaiters: cfg.longPollMax, Views: views})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -85,6 +87,17 @@ func serve() int {
 		OnRevision: func() { keeper.Refresh(ctx) }}
 	go poller.Run(ctx)
 	go keeper.Run(ctx, cfg.siteRefresh)
+	go g.Run(ctx)
+	reporter := &core.Reporter{Client: client, Views: views, On: store.Counting, Now: time.Now,
+		Waiting: func() (int64, bool) { w := g.Reported(); return w.N, w.Capped },
+		Revision: func() int64 {
+			if a := store.View().Access; a != nil {
+				return a.Revision
+			}
+			return 0
+		}}
+	reported := make(chan struct{})
+	go func() { reporter.Run(ctx); close(reported) }()
 
 	srv := &http.Server{
 		Addr:              cfg.listen,
@@ -103,6 +116,7 @@ func serve() int {
 
 	go func() {
 		<-ctx.Done()
+		g.Stop()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
@@ -116,6 +130,7 @@ func serve() int {
 		log.Error("server stopped", "err", err)
 		return 1
 	}
+	<-reported // the counts are kept and the last report sent (3 s at most)
 	return 0
 }
 

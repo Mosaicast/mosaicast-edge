@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,10 @@ type Data struct {
 	Legal     []Link         // the legal links every page carries
 	Credits   []theme.Credit
 	Calendar  string // countdown: link to a calendar entry for the opening
+	// Waiting is how many pages follow the policy live (countdown, maintenance, closed, unavailable):
+	// pages, not people. The runtime keeps [data-edge-count="waiting"] current; this is the first value.
+	Waiting       int64
+	WaitingCapped bool // the count stopped at the edge's long-poll limit; the true number is higher
 
 	rd       *Renderer
 	siteName string // for {site} in texts
@@ -93,7 +98,7 @@ var codeRe = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 func (rd *Renderer) data(r *http.Request, req gate.Request, p plan, lang string, cp *sitecopy.Copy) *Data {
 	now := rd.Now()
 	d := &Data{Page: req.Page, Lang: lang, Locales: p.candidates, rd: rd, plan: p, r: r, cp: cp, req: req,
-		used: map[string]bool{}, Viewer: req.Viewer}
+		used: map[string]bool{}, Viewer: req.Viewer, Waiting: req.Waiting.N, WaitingCapped: req.Waiting.Capped}
 	d.layers = rd.layers(p, lang)
 	sa := rd.siteAssets.get(cp)
 	d.Site = SiteData{Name: cp.Site.Name, Logo: sa.logo, DarkLogo: sa.darkLogo}
@@ -244,7 +249,59 @@ func (d *Data) HTMLAttrs() template.HTMLAttr {
 	if d.Viewer != nil && d.Viewer.SignedIn {
 		b.WriteString(` data-viewer="signed-in"`)
 	}
+	if watches(d.Page) {
+		fmt.Fprintf(&b, ` data-waiting="%d"`, d.Waiting)
+		if d.WaitingCapped {
+			b.WriteString(` data-waiting-capped`)
+		}
+	}
 	return template.HTMLAttr(b.String())
+}
+
+// watches reports whether a page follows the policy live (holds a /_a/state long-poll), and so is
+// counted as waiting.
+func watches(page string) bool {
+	switch page {
+	case gate.PageCountdown, gate.PageMaintenance, gate.PageClosed, gate.PageUnavailable:
+		return true
+	}
+	return false
+}
+
+// WaitingText is the waiting count as a sentence in the page language ("1,234 are waiting"), from the
+// texts count.waiting.one / count.waiting.other with {n}; "2,500+" when the count is capped.
+func (d *Data) WaitingText() (string, error) {
+	n := formatCount(d.Waiting, d.Lang)
+	if d.WaitingCapped {
+		t, err := d.T("count.capped")
+		if err != nil {
+			return "", err
+		}
+		n = strings.ReplaceAll(t, "{n}", n)
+	}
+	key := "count.waiting.other"
+	if d.Waiting == 1 && !d.WaitingCapped {
+		key = "count.waiting.one"
+	}
+	t, err := d.T(key)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(t, "{n}", n), nil
+}
+
+// formatCount groups digits the way the runtime's Intl.NumberFormat does for the languages the edge
+// ships: 1,234 in English, 1.234 in German.
+func formatCount(n int64, lang string) string {
+	s := strconv.FormatInt(n, 10)
+	sep := ","
+	if lang == "de" {
+		sep = "."
+	}
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + sep + s[i:]
+	}
+	return s
 }
 
 func modeOf(cp *sitecopy.Copy) string {
@@ -355,6 +412,8 @@ type runtimeConfig struct {
 	Site      runtimeSite                  `json:"site"`
 	Countdown *runtimeCountdown            `json:"countdown,omitempty"`
 	Texts     map[string]map[string]string `json:"texts"`
+
+	gate.Waiting // waiting, waitingCapped
 }
 
 type runtimeSite struct {
@@ -372,7 +431,8 @@ type runtimeCountdown struct {
 func (rd *Renderer) runtimeConfig(d *Data, sa *siteAssetSet, now time.Time) runtimeConfig {
 	v := d.req.View
 	c := runtimeConfig{Page: d.Page, Lang: d.Lang, Locales: d.Locales, Now: now.UnixMilli(), Rev: v.Seq,
-		Viewer: d.Viewer, Site: runtimeSite{Name: d.Site.Name}, Texts: map[string]map[string]string{}}
+		Viewer: d.Viewer, Site: runtimeSite{Name: d.Site.Name}, Texts: map[string]map[string]string{},
+		Waiting: d.req.Waiting}
 	c.OpensAt, c.EndsAt = ms(d.OpensAt), ms(d.EndsAt)
 	c.DownSince = ms(d.DownSince)
 	if d.Page == gate.PageCountdown {

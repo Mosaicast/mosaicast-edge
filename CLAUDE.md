@@ -47,7 +47,12 @@ Never `pkill -f` the server (matches the tool's own shell); use `tmp/edge.pid`.
   (last good policy, disk cache, core up/down + downSince, `Seq` + `Wait` for the long-poll, flip timer).
 - `internal/core` — HTTP client; `Poller` (2 s, ETag/304; core down only after 2 failed polls in a row; any other status, 404 included, keeps the last good policy: a 404 means a wrong upstream, never "open"); `Roles` (`/api/me`: cookie shape
   check `LooksLikeSession`, PAT `TokenRole` (`LooksLikeToken`, `BearerToken`; gate caps admin → podcaster), per-IP token bucket, in-flight cap, 30 s / 10 s negative cache, fail closed),
-  `ClientIP`.
+  `ClientIP`; `Reporter` (§18.5: POST /api/site/edge/report every 30 s and on shutdown, ack drops only sent
+  hours, 401/404 retried every 10 min).
+- `internal/stats` — counts, never people (§19): `Gauge` (the waiting count: max of the last 30 s of held
+  long-polls, clamped to the long-poll limit → capped; never part of `Seq`: a count change wakes nobody),
+  `Views` (per page kind and UTC hour, `stats.json`, only completed hours leave, ≤168 pending, off =
+  deleted), `IsCrawler` (§19's frozen list, pinned by a test against docs/ARCHITECTURE.md).
 - `internal/sitecopy` — copy of `/api/site` tokens, branding images, legal pages per locale; disk cache.
 - `internal/gate` — root handler: `/_a/*`, OAuth pass-through, open → proxy, cookie → role check,
   pages with the edge's HTTP semantics (503 + Retry-After, plain 503 for non-HTML/non-GET),

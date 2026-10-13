@@ -10,6 +10,7 @@
 #   dev/policy closed | open
 #   dev/policy session <admin|podcaster|fan>                prints a MOSAICAST_SESSION value
 # STAFF_LOGIN=false hides the staff sign-in link on the pages (default true).
+# EDGE_COUNTING=true|false switches the edge's counting (§18.1; default: left as it is).
 set -eu
 CORE=${CORE:-/home/ned/mosaicast/mosaicast-core}
 eval "$("$CORE/dev/instance.sh" --name edge env)"
@@ -23,7 +24,8 @@ put() {
     "$MC_APP_URL/api/admin/site/access" -d "$1" >/dev/null && echo "ok: $1"
 }
 body() { # state opensAt endsAt floor
-  printf '{"state":"%s","opensAt":%s,"endsAt":%s,"passFloor":"%s","staffLoginVisible":%s,"signupsWhileClosed":false}' "$1" "$2" "$3" "$4" "${STAFF_LOGIN:-true}"
+  printf '{"state":"%s","opensAt":%s,"endsAt":%s,"passFloor":"%s","staffLoginVisible":%s,"signupsWhileClosed":false%s}' \
+    "$1" "$2" "$3" "$4" "${STAFF_LOGIN:-true}" "${EDGE_COUNTING:+,\"edgeCounting\":$EDGE_COUNTING}"
 }
 case "${1:-show}" in
   show) curl -s "$MC_APP_URL/api/site/access"; echo ;;

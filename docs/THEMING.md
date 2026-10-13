@@ -232,6 +232,7 @@ screen. Place `{{.EdgeHead}}` first in `<head>`: it carries the charset.
 | `.LegalPage` | | legal | `{Slug, Title, Role, HTML}`, nil for an unknown slug (the page is then a 404) |
 | `.Legal` | list | all | `{Title, Href, Role}`, what `.EdgeLegal` renders |
 | `.Credits` | list | all | your credits |
+| `.Waiting`, `.WaitingCapped` | int, bool | countdown, maintenance, closed, unavailable | how many are waiting, at render time; see [the waiting count](#the-waiting-count) |
 
 | method | |
 |---|---|
@@ -240,6 +241,7 @@ screen. Place `{{.EdgeHead}}` first in `<head>`: it carries the charset.
 | `{{.Plural "unit.d" 3}}` | `unit.d.one` for 1, `unit.d.other` otherwise |
 | `{{.Asset "img/bg.webp"}}` | the URL of a file under `assets/` |
 | `{{.PageTitle}}` | the text `<page>.title` |
+| `{{.WaitingText}}` | the waiting count as a sentence in the page language: "1,234 are waiting" |
 
 An unknown asset, an unknown text key or a template error fails `check-theme` and stops the edge from
 starting, so a broken theme is caught before it is live, never in front of visitors.
@@ -303,6 +305,8 @@ It never reads the visitor's device clock, which may be wrong or deliberately se
 | `data-scheme` | `light`, `dark` | what that policy resolves to for this visitor, set and kept live by the runtime |
 | `data-down` | `short`, `long` | unavailable only |
 | `data-viewer` | `signed-in` | someone signed in who cannot see the site yet |
+| `data-waiting` | a number | the [waiting count](#the-waiting-count); on countdown, maintenance, closed, unavailable |
+| `data-waiting-capped` | present | the count stopped at the edge's limit |
 | `lang` | the page language | changes with the language switch |
 
 `data-mode` is the site's policy, not the colours in use: under `system` the visitor's own preference
@@ -345,6 +349,9 @@ Most themes need little more than CSS on these:
 | `data-edge-src="url"` on `img`, `audio`, `video` | becomes `src` at `countdown.preloadSeconds`, so heavy artwork for the finale is not loaded days early |
 | `data-edge-handoff` | a click during `party` skips to the handoff ("enter now") |
 | `data-edge-calendar` | keeps its `?lang=` in step with the language switch |
+| `data-edge-count="waiting"` | writes the [waiting count](#the-waiting-count) ("1,234", "2,500+") |
+| `data-edge-count-text="waiting"` | writes it as a sentence ("1,234 are waiting") |
+| `data-edge-count-min="N"` | hides the element while fewer than N are waiting |
 
 The runtime marks the ticking elements (`data-edge-unit`, `data-edge-unit-label`, `data-edge-final`,
 `data-edge-split`) `aria-hidden="true"` and speaks for them itself; see [Accessibility](#accessibility).
@@ -366,6 +373,7 @@ before the first one fires, so you see every event from `edge:ready` on.
 | `edge:down` | `{long: true}` | unavailable: the outage passed a minute |
 | `edge:reconnect` | `{}` | unavailable: the site is back, the page reloads now |
 | `edge:scheme` | `{scheme, from}` | the resolved colour scheme changed (the visitor switched their system setting) |
+| `edge:count` | `{name: "waiting", value, capped}` | the [waiting count](#the-waiting-count) changed |
 
 ```js
 document.addEventListener('edge:party', () => confetti.burst());
@@ -383,8 +391,33 @@ A read-only object for scripts that need a value rather than an event:
 | `edge.now()` | the edge's time in unix ms. Use it instead of `Date.now()`. |
 | `edge.remaining` | ms until opening (countdown), else `null` |
 | `edge.phase`, `edge.lang`, `edge.opensAt`, `edge.scheme` | current values |
+| `edge.waiting` | `{value, capped}`, the [waiting count](#the-waiting-count) |
 | `edge.t(key, {name: value})` | a text in the current language |
 | `edge.data` | `{page, viewer, site: {name}, endsAt, downSince, locales, countdown}`; `countdown` is `{finalMs, partyMs, handoffMs}` on the countdown, else `null` |
+
+### The waiting count
+
+"1,234 are waiting" on the countdown. The count is the pages that follow the edge live right now:
+countdown, maintenance, closed and unavailable pages, which each keep one request open to the edge.
+It counts **pages, not people**: two tabs count twice, a page in a background tab counts, a crawler
+that runs no JavaScript does not. Nothing identifies anyone, and nothing is stored.
+
+- It moves about every 25 seconds, with the edge's answers the page gets anyway, and is the highest of
+  the last half minute, so it does not drop to nothing for a moment when the opening time changes.
+- Beyond the edge's long-poll limit (`EDGE_LONGPOLL_MAX`, 2500 by default) it stops at the limit and
+  is marked capped: "2,500+" (text `count.capped`).
+- It is a theme's choice: nothing shows it unless a template does.
+
+```html
+<p class="waiting" data-edge-count-min="10" data-edge-count-text="waiting"
+   {{if lt .Waiting 10}}hidden{{end}}>{{.WaitingText}}</p>
+```
+
+`data-edge-count-min` keeps it out of sight while the number is small (a lone visitor reading "1 is
+waiting" is harmless, but rarely what a launch page wants); render it `hidden` the same way so it does
+not flash before the runtime runs. For the number alone use `data-edge-count="waiting"` and your own
+words around it; `count.waiting.one` / `count.waiting.other` (with `{n}`) are ordinary texts you can
+override. In the preview, the "Waiting count" links set the number the pages show.
 
 ## CSS hooks
 

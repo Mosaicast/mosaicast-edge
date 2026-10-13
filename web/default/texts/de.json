@@ -19,6 +19,10 @@
   "unit.s.one": "Sekunde",
   "unit.s.other": "Sekunden",
 
+  "count.waiting.one": "{n} wartet",
+  "count.waiting.other": "{n} warten",
+  "count.capped": "{n}+",
+
   "maintenance.title": "{site} wird gewartet",
   "maintenance.lead": "Wir arbeiten an der Seite und sind wieder da, sobald wir fertig sind.",
   "maintenance.until": "Geplant bis",

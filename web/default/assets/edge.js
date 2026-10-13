@@ -40,6 +40,7 @@
       }
       base = best.server;
       baseAt = best.at;
+      setCount(best.body);
       return best.body;
     } catch { return null; /* offline: keep counting from the time the page came with */ }
   }
@@ -82,6 +83,7 @@
       a.href = u.pathname + u.search;
     });
     renderDates();
+    renderCount();
     shown = '';
     if (cfg.page === 'countdown') { render(); announce(true); }
     emit('lang', { lang, from });
@@ -92,6 +94,31 @@
     e.preventDefault();
     applyLang(el.dataset.edgeLang);
   });
+
+  // ---------- waiting count ----------
+  // How many pages follow the policy live right now: pages, not people. It comes with every /_a/state
+  // answer, so it moves about every 25 s. [data-edge-count="waiting"] gets the number,
+  // [data-edge-count-text="waiting"] the sentence; any element with data-edge-count-min="N" is hidden
+  // while fewer than N are waiting.
+  let waiting = { value: cfg.waiting ?? 0, capped: !!cfg.waitingCapped };
+  function renderCount() {
+    const num = new Intl.NumberFormat(lang).format(waiting.value);
+    const n = waiting.capped ? t('count.capped', { n: num }) : num;
+    const sentence = t(`count.waiting.${waiting.value === 1 && !waiting.capped ? 'one' : 'other'}`, { n });
+    $$('[data-edge-count="waiting"]').forEach((el) => { el.textContent = n; });
+    $$('[data-edge-count-text="waiting"]').forEach((el) => { el.textContent = sentence; });
+    $$('[data-edge-count-min]').forEach((el) => { el.hidden = waiting.value < Number(el.dataset.edgeCountMin); });
+    root.dataset.waiting = String(waiting.value);
+    root.toggleAttribute('data-waiting-capped', waiting.capped);
+  }
+  function setCount(s) {
+    if (typeof s?.waiting !== 'number') return;
+    const next = { value: s.waiting, capped: !!s.waitingCapped };
+    if (next.value === waiting.value && next.capped === waiting.capped) return;
+    waiting = next;
+    renderCount();
+    emit('count', { name: 'waiting', value: waiting.value, capped: waiting.capped });
+  }
 
   // ---------- screen readers ----------
   // A display that changes every second must not be read out every second. The runtime hides the
@@ -268,6 +295,7 @@
         const r = await fetch(`/_a/state?rev=${rev}`, { cache: 'no-store' });
         const s = await r.json();
         const same = s.rev === rev;
+        setCount(s);
         onState(s);
         if (same && performance.now() - t0 < 1000) await sleep(3000); // the edge is busy: poll gently
       } catch {
@@ -325,6 +353,7 @@
     get opensAt() { return opensAt; },
     get remaining() { return opensAt == null ? null : opensAt - now(); },
     get scheme() { return scheme(); },
+    get waiting() { return { ...waiting }; },
     data: Object.freeze({
       page: cfg.page, viewer: cfg.viewer, site: cfg.site, endsAt: cfg.endsAt, downSince: cfg.downSince, locales: cfg.locales,
       countdown: cd ? Object.freeze({ finalMs: cd.finalMs, partyMs: cd.partyMs, handoffMs: cd.handoffMs }) : null,
@@ -336,6 +365,7 @@
   // theme listeners see the first edge:phase and edge:ready.
   function start() {
     renderDates();
+    renderCount();
     hideTickers();
     guard();
     if (cfg.page === 'unavailable') downTimer();

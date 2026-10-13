@@ -5,5 +5,6 @@ tmp
 cache
 node_modules
 docs
+!docs/ARCHITECTURE.md
 dev
 deploy

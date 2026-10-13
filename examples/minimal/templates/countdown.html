@@ -16,6 +16,7 @@
         <span data-edge-unit="d">{{.Countdown.D}}</span><b>:</b><span data-edge-unit="h">{{.Countdown.H}}</span><b>:</b><span data-edge-unit="m">{{.Countdown.M}}</span><b>:</b><span data-edge-unit="s">{{.Countdown.S}}</span>
       </p>
       <p><time data-edge-when="opensAt">{{.When}}</time></p>
+      <p class="mx-waiting" data-edge-count-min="2" data-edge-count-text="waiting"{{if lt .Waiting 2}} hidden{{end}}>{{.WaitingText}}</p>
       <p><a href="{{.Calendar}}" data-edge-calendar data-edge-text="countdown.calendar">{{.T "countdown.calendar"}}</a></p>
     </section>
 

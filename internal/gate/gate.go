@@ -21,6 +21,7 @@ import (
 
 	"github.com/Mosaicast/mosaicast-edge/internal/core"
 	"github.com/Mosaicast/mosaicast-edge/internal/policy"
+	"github.com/Mosaicast/mosaicast-edge/internal/stats"
 )
 
 // Prefix is the edge's own path space. It is answered by the edge in every state, open included, so
@@ -50,6 +51,15 @@ type Request struct {
 	Viewer     *Viewer
 	LoginError string // /_a/login?error=
 	LegalSlug  string // /_a/legal/{slug}
+	Waiting    Waiting
+}
+
+// Waiting is how many pages are following the policy live right now: the /_a/state long-polls the
+// edge holds, smoothed over the last half minute. Pages, not people: two tabs count twice, and
+// nothing identifies anyone. Beyond the long-poll limit the count stops there and Capped is set.
+type Waiting struct {
+	N      int64 `json:"waiting"`
+	Capped bool  `json:"waitingCapped"`
 }
 
 // Renderer turns a page request into HTML. found is false for a legal slug the copy does not have.
@@ -83,8 +93,15 @@ type Gate struct {
 
 	// long-polls in flight on /_a/state; beyond maxWaiters they are answered at once
 	waiters    atomic.Int64
+	waitersGPC atomic.Int64 // of those, the ones that sent Sec-GPC: 1; left out of what is reported to core
 	maxWaiters int64
 	pollHold   time.Duration
+	gauge      *stats.Gauge
+	reported   *stats.Gauge // the gauge without GPC pages, for core (§19)
+	waiting    func() Waiting
+	views      *stats.Views
+	stopping   context.Context // done once the edge shuts down: held long-polls are answered
+	stop       context.CancelFunc
 }
 
 // Options configure a gate.
@@ -97,6 +114,8 @@ type Options struct {
 	Transport  http.RoundTripper // nil = a transport with short dial timeouts
 	MaxWaiters int64             // concurrent long-polls; 0 = 5000
 	PollHold   time.Duration     // how long a long-poll is held; 0 = 25 s (under nginx's 60 s read timeout)
+	Waiting    func() Waiting    // nil = the held long-polls (Run samples them); the preview sets its own
+	Views      *stats.Views      // counts rendered pages for core (§18.5); nil = none
 }
 
 // New builds the gate.
@@ -108,6 +127,17 @@ func New(o Options) *Gate {
 	}
 	if g.pollHold == 0 {
 		g.pollHold = 25 * time.Second
+	}
+	g.stopping, g.stop = context.WithCancel(context.Background())
+	g.gauge = stats.NewGauge(g.waiters.Load, g.maxWaiters, gaugeWindow)
+	g.reported = stats.NewGauge(func() int64 { gpc := g.waitersGPC.Load(); return g.waiters.Load() - gpc }, g.maxWaiters, gaugeWindow)
+	g.views = o.Views
+	g.waiting = o.Waiting
+	if g.waiting == nil {
+		g.waiting = func() Waiting {
+			n, capped := g.gauge.Value()
+			return Waiting{N: n, Capped: capped}
+		}
 	}
 	tr := o.Transport
 	if tr == nil {
@@ -135,6 +165,33 @@ func New(o Options) *Gate {
 	})
 	g.mux.Handle(Prefix, g.pages.Assets())
 	return g
+}
+
+// The waiting count is the highest of the last gaugeWindow samples, one every gaugeEvery: half a
+// minute, longer than it takes every page let go by a policy change to come back.
+const (
+	gaugeEvery  = 5 * time.Second
+	gaugeWindow = 6
+)
+
+// Run keeps the waiting count's samples until ctx ends.
+func (g *Gate) Run(ctx context.Context) {
+	go g.reported.Run(ctx, gaugeEvery)
+	g.gauge.Run(ctx, gaugeEvery)
+}
+
+// Reported is the waiting count as core gets it (§18.5): without the pages that asked not to be
+// tracked (Sec-GPC), capped when the held long-polls reached the limit.
+func (g *Gate) Reported() Waiting {
+	n, _ := g.reported.Value()
+	_, capped := g.gauge.Value()
+	return Waiting{N: n, Capped: capped}
+}
+
+// Stop answers every held long-poll and holds no new ones, so a shutdown is not kept waiting by pages
+// that would otherwise sit out the rest of their hold. The pages poll again and find the edge back.
+func (g *Gate) Stop() {
+	g.stop()
 }
 
 func defaultTransport() *http.Transport {
@@ -262,6 +319,7 @@ func (g *Gate) servePage(w http.ResponseWriter, r *http.Request, req Request, st
 	if req.View.Seq == 0 && req.View.Page == "" {
 		req.View = g.store.View()
 	}
+	req.Waiting = g.waiting()
 	body, found, err := g.pages.Render(r, req)
 	if err != nil {
 		slog.Error("page render failed", "page", req.Page, "err", err)
@@ -284,6 +342,26 @@ func (g *Gate) servePage(w http.ResponseWriter, r *http.Request, req Request, st
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body)
 	}
+	g.count(r, req.Page, status)
+}
+
+// count adds a page view for core (§18.5, §19): a page rendered for a GET, unless the request asked
+// not to be tracked or comes from a crawler. Both headers are read here and kept nowhere.
+func (g *Gate) count(r *http.Request, page string, status int) {
+	if g.views == nil || r.Method != http.MethodGet || (status != http.StatusOK && status != http.StatusServiceUnavailable) {
+		return
+	}
+	if gpc(r) || stats.IsCrawler(r.UserAgent()) {
+		return
+	}
+	if k, ok := stats.KindOf(page); ok {
+		g.views.Count(k)
+	}
+}
+
+// gpc reports whether the browser sends Global Privacy Control.
+func gpc(r *http.Request) bool {
+	return strings.TrimSpace(r.Header.Get("Sec-GPC")) == "1"
 }
 
 func (g *Gate) plain503(w http.ResponseWriter, view policy.View) {
@@ -349,6 +427,7 @@ type stateReply struct {
 	CoreUp    bool   `json:"coreUp"`
 	DownSince *int64 `json:"downSince"`
 	Rev       uint64 `json:"rev"`
+	Waiting          // never part of rev: a change in the count must not wake every page
 }
 
 // serveState answers at once, or with ?rev=N holds the request until the state differs from N
@@ -358,15 +437,21 @@ func (g *Gate) serveState(w http.ResponseWriter, r *http.Request) {
 	v := g.store.View()
 	if raw := r.URL.Query().Get("rev"); raw != "" {
 		if rev, err := strconv.ParseUint(raw, 10, 64); err == nil && rev == v.Seq {
-			if g.waiters.Add(1) <= g.maxWaiters {
+			if gpc(r) {
+				g.waitersGPC.Add(1)
+				defer g.waitersGPC.Add(-1)
+			}
+			if g.waiters.Add(1) <= g.maxWaiters && g.stopping.Err() == nil {
 				ctx, cancel := context.WithTimeout(r.Context(), g.pollHold)
+				unhook := context.AfterFunc(g.stopping, cancel)
 				v = g.store.Wait(ctx, rev)
+				unhook()
 				cancel()
 			}
 			g.waiters.Add(-1)
 		}
 	}
-	reply := stateReply{Now: g.now().UnixMilli(), Page: pageFor(v.Page), CoreUp: v.CoreUp, Rev: v.Seq}
+	reply := stateReply{Now: g.now().UnixMilli(), Page: pageFor(v.Page), CoreUp: v.CoreUp, Rev: v.Seq, Waiting: g.waiting()}
 	if v.Page == policy.Open {
 		reply.Page = policy.Open
 	}

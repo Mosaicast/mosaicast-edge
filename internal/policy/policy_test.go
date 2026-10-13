@@ -122,3 +122,52 @@ func TestStoreIgnoresDerivedFields(t *testing.T) {
 		t.Error("core's now changing must not wake every page")
 	}
 }
+
+// An admin save that changes nothing a page on screen shows wakes nobody, and is still kept and cached.
+func TestStoreWakesOnlyForWhatPagesShow(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(func() time.Time { return t0 }, dir)
+	at := t0.Add(time.Hour)
+	on, off := true, false
+	base := Access{State: Scheduled, OpensAt: &at, PassFloor: RolePodcaster, Revision: 1, EdgeCounting: &on,
+		StaffLogin: StaffLogin{Visible: true}}
+	s.Set(&base, `"1"`)
+	seq := s.View().Seq
+	if !s.Counting() {
+		t.Fatal("edgeCounting on")
+	}
+	quiet := base
+	quiet.Revision, quiet.EdgeCounting, quiet.PassFloor, quiet.StaffLogin = 2, &off, RoleAdmin, StaffLogin{}
+	s.Set(&quiet, `"2"`)
+	if s.View().Seq != seq {
+		t.Error("edgeCounting, passFloor, staffLogin or a revision alone must not wake every page")
+	}
+	if s.Counting() {
+		t.Error("edgeCounting off is applied at once")
+	}
+	if c := NewStore(func() time.Time { return t0 }, dir); c.Counting() || c.View().Access.Revision != 2 {
+		t.Error("the quiet change is cached")
+	}
+	later := t0.Add(2 * time.Hour)
+	moved := quiet
+	moved.Revision, moved.OpensAt = 3, &later
+	s.Set(&moved, `"3"`)
+	if s.View().Seq == seq {
+		t.Error("a new opening time wakes the pages")
+	}
+}
+
+func TestCountingFailsClosedAndDefaultsOn(t *testing.T) {
+	s := NewStore(func() time.Time { return t0 }, "")
+	if s.Counting() {
+		t.Error("no policy known: no counting")
+	}
+	a, err := Parse([]byte(`{"state":"closed","revision":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Set(a, `"1"`)
+	if !s.Counting() {
+		t.Error("an older core without edgeCounting means on")
+	}
+}

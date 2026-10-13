@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.0] – 2026-10-13
+
+Anonymous counting (§18.1/§18.2 `edgeCounting`, §18.5, §19; core 0.9.0). Counts, never people.
+
+- The waiting count: the `/_a/state` long-polls the edge holds (pages, not people), the highest of the
+  last 30 s, clamped to `EDGE_LONGPOLL_MAX` and then shown as capped ("2,500+"). In `/_a/state` and the
+  page data, never part of `rev`: a change in the count wakes nobody. Themes place it with
+  `data-edge-count="waiting"` / `data-edge-count-text="waiting"` (`data-edge-count-min` hides it below a
+  number); `edge:count`, `edge.waiting`, `.Waiting` / `.WaitingCapped` / `.WaitingText`, texts
+  `count.waiting.*` and `count.capped` in DE and EN. Themes that don't place it are unchanged.
+- Page views per page kind and UTC hour, kept in `stats.json` in the cache dir across restarts; only
+  completed hours leave the edge, at most 168 pending. Counted: a page rendered for a GET with 200 or
+  503. Not counted: HEAD, redirects, 404s, plain 503s, anything proxied, crawlers (§19's list),
+  `Sec-GPC: 1`. GPC long-polls stay out of the count core gets; the page's own display includes them.
+- The report: `POST /api/site/edge/report` every 30 s and on shutdown, at most 48 hours each, acknowledged
+  hours dropped; 401/404 (an older core) asked again every 10 minutes; after three refusals in a row the
+  count goes alone and the hours are tried again every 10 minutes.
+- `edgeCounting` (Admin → Site access): off counts nothing, deletes `stats.json` and sends nothing; the
+  page keeps its waiting count. Missing means on (an older core); before the first policy nothing counts.
+- Pages wake only for what they show (state, `opensAt`, `endsAt`): an admin save that changes only the
+  staff link, the pass floor, `edgeCounting` or the revision no longer wakes every open page.
+- Shutdown answers held long-polls at once instead of letting them sit out their hold.
+- `dev/smoke.mjs`: three counting rows against core; `dev/policy` takes `EDGE_COUNTING`.
+
 ## [0.1.1] – 2026-10-12
 
 - Staff automation passes before the opening: a request with a personal access token
