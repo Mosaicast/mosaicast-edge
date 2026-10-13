@@ -386,7 +386,10 @@ func TestTokenCheck(t *testing.T) {
 	}
 	bearer := func(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
 
-	for n, want := range map[int]bool{1: true, 2: true, 3: false, 4: false} {
+	for n, want := range []bool{1: true, 2: true, 3: false, 4: false} { // in order: token 2 is the last to pass
+		if n == 0 {
+			continue
+		}
 		w := upload(bearer(pat(n)))
 		if passed := w.Header().Get("X-Upstream") == "core"; passed != want {
 			t.Errorf("token %d: passed=%v, want %v", n, passed, want)
