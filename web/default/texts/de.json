@@ -33,7 +33,7 @@
 
   "unavailable.title": "{site} ist gleich wieder da",
   "unavailable.short": "Die Seite startet neu. Diese Seite lädt von selbst neu.",
-  "unavailable.long": "Das dauert länger als üblich. Diese Seite versucht es weiter und lädt sich von selbst neu.",
+  "unavailable.long": "Das dauert länger als üblich. Diese Seite versucht es weiter und lädt von selbst neu.",
   "unavailable.retry": "Noch mal versuchen",
 
   "login.title": "Anmeldung für das Team",
