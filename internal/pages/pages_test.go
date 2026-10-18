@@ -109,7 +109,7 @@ func TestRestyleUsesDefaultTemplateWithThemeStyles(t *testing.T) {
 		t.Error("restyle = default template + theme stylesheet")
 	}
 	// the page is English (edge locales), the theme only speaks German: its first locale, not edge text
-	if !strings.Contains(s, ">Zu!<") || !strings.Contains(s, "The site is not available") {
+	if !strings.Contains(s, ">Zu!<") || !strings.Contains(s, "The site isn&#39;t available") {
 		t.Errorf("text layering wrong:\n%s", s)
 	}
 	// pages the theme does not touch stay pure default

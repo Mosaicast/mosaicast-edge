@@ -442,8 +442,9 @@ await check('login_error=signups_closed → /_a/login with the text, de and en',
   expect(r.status === 303 && r.headers.location === '/_a/login?error=signups_closed', `${r.status} ${r.headers.location}`);
   const de = await get(r.headers.location, { 'Accept-Language': 'de-DE' });
   const en = await get(r.headers.location, { 'Accept-Language': 'en' });
-  expect(de.body.includes('Neue Konten können noch nicht angelegt werden'), 'de text missing');
-  expect(en.body.includes("New accounts can't be created yet"), 'en text missing');
+  expect(de.body.includes('Du kannst noch kein Konto anlegen'), 'de text missing');
+  // no apostrophe in the needle: html/template may emit it as &#39;
+  expect(en.body.includes('create an account yet'), 'en text missing');
 });
 
 await check('abuse: 300 random well-shaped cookies from one client cost core ≤ 10 lookups', async () => {
