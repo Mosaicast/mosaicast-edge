@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] – 2026-10-18
+
+Wording only. The default theme's English and German texts follow the suite's writing guide (mosaicast-core
+`docs/WRITING.md`): contractions in English, no "Please", and the sign-in errors match core's new wording.
+Keys and placeholders are unchanged, so themes that override texts keep working.
+
 ## [0.2.0] – 2026-10-13
 
 Anonymous counting (§18.1/§18.2 `edgeCounting`, §18.5, §19; core 0.9.0). Counts, never people.

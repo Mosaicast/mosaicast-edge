@@ -24,7 +24,7 @@
   "count.capped": "{n}+",
 
   "maintenance.title": "{site} wird gewartet",
-  "maintenance.lead": "Wir arbeiten an der Seite und sind wieder da, sobald wir fertig sind.",
+  "maintenance.lead": "Wir arbeiten an der Seite und sind bald wieder da.",
   "maintenance.until": "Geplant bis",
 
   "closed.title": "{site} ist geschlossen",
@@ -32,9 +32,9 @@
   "closed.signedIn": "Du bist angemeldet, aber die Seite ist für dein Konto gerade nicht geöffnet.",
 
   "unavailable.title": "{site} ist gleich wieder da",
-  "unavailable.short": "Die Seite startet neu. Diese Seite lädt sich von selbst neu.",
+  "unavailable.short": "Die Seite startet neu. Diese Seite lädt von selbst neu.",
   "unavailable.long": "Das dauert länger als üblich. Diese Seite versucht es weiter und lädt sich von selbst neu.",
-  "unavailable.retry": "Erneut versuchen",
+  "unavailable.retry": "Noch mal versuchen",
 
   "login.title": "Anmeldung für das Team",
   "login.lead": "Melde dich an, um die Seite zu sehen, solange sie noch nicht für alle offen ist.",
@@ -44,13 +44,13 @@
   "login.link": "Anmeldung für das Team",
   "login.provider.discord": "Discord",
 
-  "loginError.generic": "Anmeldung fehlgeschlagen. Bitte erneut versuchen.",
-  "loginError.failed": "Anmeldung fehlgeschlagen. Bitte erneut versuchen.",
-  "loginError.account_conflict": "Dieses Konto ist bereits mit einem anderen Nutzer verknüpft. Melde dich mit deiner bestehenden Methode an und verknüpfe es dann im Konto.",
-  "loginError.link_required": "Ein Konto mit dieser E-Mail existiert. Melde dich mit deiner bestehenden Methode an und verknüpfe dieses dann im Konto.",
-  "loginError.signups_closed": "Neue Konten können noch nicht angelegt werden. Die Anmeldung öffnet mit der Seite.",
+  "loginError.generic": "Anmeldung fehlgeschlagen. Versuch es noch mal.",
+  "loginError.failed": "Anmeldung fehlgeschlagen. Versuch es noch mal.",
+  "loginError.account_conflict": "Dieses Konto ist schon mit einer anderen Person verknüpft. Melde dich wie gewohnt an und verknüpfe es dann in deinem Konto.",
+  "loginError.link_required": "Mit dieser E-Mail gibt es schon ein Konto. Melde dich wie gewohnt an und verknüpfe dieses dann in deinem Konto.",
+  "loginError.signups_closed": "Du kannst noch kein Konto anlegen. Die Anmeldung öffnet mit der Seite.",
   "loginError.access_denied": "Die Anmeldung wurde abgebrochen.",
-  "loginError.authorization_request_not_found": "Die Anmeldung hat zu lange gedauert oder wurde in einem anderen Fenster begonnen. Bitte erneut versuchen.",
+  "loginError.authorization_request_not_found": "Die Anmeldung hat zu lange gedauert oder lief in einem anderen Fenster. Versuch es noch mal.",
 
   "legal.title": "Rechtliches",
   "legal.nav": "Rechtliche Hinweise",
